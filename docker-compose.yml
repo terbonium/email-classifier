@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  email-classifier:
+    build: .
+    container_name: email-classifier
+    environment:
+      - IMAP_HOST=${IMAP_HOST:-mail.example.com}
+      - IMAP_PORT=${IMAP_PORT:-993}
+      - IMAP_USERS=${IMAP_USERS:-user1@example.com:password1}
+      - TRAINING_INTERVAL=${TRAINING_INTERVAL:-3600}
+      - CONFIDENCE_THRESHOLD=${CONFIDENCE_THRESHOLD:-0.7}
+      - DELIVERY_HOST=${DELIVERY_HOST:-mailserver}
+      - DELIVERY_PORT=${DELIVERY_PORT:-25}
+      - DELIVERY_USE_TLS=${DELIVERY_USE_TLS:-false}
+      - DELIVERY_USER=${DELIVERY_USER:-}
+      - DELIVERY_PASSWORD=${DELIVERY_PASSWORD:-}
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
+    ports:
+      - "8080:8080"
+      - "2525:2525"
+    restart: unless-stopped
+    networks:
+      - mailserver-network
+
+networks:
+  mailserver-network:
+    external: true

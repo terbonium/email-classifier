@@ -1,0 +1,58 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+# Upgrade pip and install wheel
+RUN pip install --no-cache-dir --upgrade pip wheel
+
+# Install PyTorch CPU-only separately (much smaller - ~140MB vs 670MB for CUDA version)
+RUN pip install --no-cache-dir \
+    --default-timeout=300 \
+    --retries 10 \
+    --index-url https://download.pytorch.org/whl/cpu \
+    torch==2.1.0
+
+# Install numpy (required by many packages)
+RUN pip install --no-cache-dir numpy==1.24.3
+
+# Install transformers and its dependencies
+RUN pip install --no-cache-dir \
+    --default-timeout=300 \
+    --retries 10 \
+    transformers==4.36.0
+
+# Install scikit-learn (includes scipy)
+RUN pip install --no-cache-dir \
+    --default-timeout=300 \
+    --retries 10 \
+    scikit-learn==1.3.2
+
+# Install remaining lightweight packages
+RUN pip install --no-cache-dir \
+    flask==3.0.0 \
+    imapclient==2.3.1 \
+    email-validator==2.2.0 \
+    aiosmtpd==1.4.4.post2
+
+# Download DistilBERT model at build time (separate layer for caching)
+RUN python -c "from transformers import AutoTokenizer, AutoModel; \
+    print('Downloading DistilBERT tokenizer...'); \
+    AutoTokenizer.from_pretrained('distilbert-base-uncased'); \
+    print('Downloading DistilBERT model...'); \
+    AutoModel.from_pretrained('distilbert-base-uncased'); \
+    print('Model download complete!')"
+
+# Copy application code (last to maximize cache hits during development)
+COPY *.py .
+
+# Create necessary directories
+RUN mkdir -p /app/data /app/models
+
+EXPOSE 8080 2525
+
+CMD ["python", "main.py"]
