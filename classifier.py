@@ -85,17 +85,19 @@ class EmailClassifier:
         # Apply user weights if available
         if user_email:
             weights = config.get_user_weights(user_email)
+            # Get classes from the trained model
+            model_classes = list(self.classifier.classes_)
             weighted_probs = []
-            for i, category in enumerate(config.CATEGORIES):
+            for i, category in enumerate(model_classes):
                 weighted_probs.append(probabilities[i] * weights.get(category, 1.0))
-            
+
             # Normalize
             total = sum(weighted_probs)
             weighted_probs = [p / total for p in weighted_probs]
-            
+
             # Get prediction from weighted probabilities
             max_idx = weighted_probs.index(max(weighted_probs))
-            prediction = config.CATEGORIES[max_idx]
+            prediction = model_classes[max_idx]
             confidence = weighted_probs[max_idx]
         else:
             confidence = max(probabilities)
@@ -106,16 +108,19 @@ class EmailClassifier:
     
     def train(self, texts: list, labels: list):
         """Train the classifier with email texts and labels"""
-        if len(texts) < len(config.CATEGORIES):
+        # Get unique categories from labels
+        unique_categories = set(labels)
+
+        if len(texts) < len(unique_categories):
             print("Not enough training data yet")
             return False
-        
-        print(f"Training on {len(texts)} emails...")
+
+        print(f"Training on {len(texts)} emails across {len(unique_categories)} categories...")
         features = [self.extract_features(text) for text in texts]
-        
+
         self.classifier.fit(features, labels)
         self.save_model()
-        print("Training complete")
+        print(f"Training complete - Model knows {len(self.classifier.classes_)} categories: {', '.join(self.classifier.classes_)}")
         return True
     
     def save_model(self):

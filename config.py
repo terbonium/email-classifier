@@ -83,7 +83,32 @@ def init_db():
                   old_category TEXT,
                   new_category TEXT,
                   timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)''')
-    
+
+    # Folder mappings table - dynamically tracks discovered IMAP folders
+    c.execute('''CREATE TABLE IF NOT EXISTS folder_mappings
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  user_email TEXT,
+                  folder_name TEXT,
+                  category TEXT,
+                  auto_discovered BOOLEAN DEFAULT 0,
+                  message_count INTEGER DEFAULT 0,
+                  last_checked DATETIME DEFAULT CURRENT_TIMESTAMP,
+                  UNIQUE(user_email, folder_name))''')
+
+    # Initialize default folder mappings if they don't exist
+    default_mappings = [
+        ('personal', 'INBOX', 0),
+        ('shopping', 'Shopping', 0),
+        ('spam', 'Junk', 0)
+    ]
+
+    for category, folder, auto in default_mappings:
+        for user_email, _ in IMAP_USERS:
+            c.execute('''INSERT OR IGNORE INTO folder_mappings
+                        (user_email, folder_name, category, auto_discovered)
+                        VALUES (?, ?, ?, ?)''',
+                     (user_email, folder, category, auto))
+
     conn.commit()
     conn.close()
 
@@ -133,10 +158,121 @@ def update_user_weights(user_email: str, weights: dict):
     """Update user's category weights"""
     conn = get_db()
     c = conn.cursor()
-    c.execute('''INSERT OR REPLACE INTO user_preferences 
+    c.execute('''INSERT OR REPLACE INTO user_preferences
                  (user_email, personal_weight, shopping_weight, spam_weight)
                  VALUES (?, ?, ?, ?)''',
-              (user_email, weights.get('personal', 1.0), 
+              (user_email, weights.get('personal', 1.0),
                weights.get('shopping', 1.0), weights.get('spam', 1.0)))
     conn.commit()
     conn.close()
+
+def get_folder_mappings(user_email: str = None) -> dict:
+    """Get folder to category mappings for a user or all users
+
+    Args:
+        user_email: If specified, get mappings for this user only
+
+    Returns:
+        dict: {category: folder_name} for single user, or {user_email: {category: folder_name}} for all
+    """
+    conn = get_db()
+    c = conn.cursor()
+
+    if user_email:
+        c.execute('''SELECT category, folder_name FROM folder_mappings
+                    WHERE user_email = ?
+                    ORDER BY category''', (user_email,))
+        rows = c.fetchall()
+        conn.close()
+        return {row[0]: row[1] for row in rows}
+    else:
+        c.execute('''SELECT user_email, category, folder_name FROM folder_mappings
+                    ORDER BY user_email, category''')
+        rows = c.fetchall()
+        conn.close()
+
+        result = {}
+        for user, category, folder in rows:
+            if user not in result:
+                result[user] = {}
+            result[user][category] = folder
+        return result
+
+def get_all_categories(user_email: str = None) -> List[str]:
+    """Get all known categories for a user or across all users
+
+    Args:
+        user_email: If specified, get categories for this user only
+
+    Returns:
+        List of category names
+    """
+    conn = get_db()
+    c = conn.cursor()
+
+    if user_email:
+        c.execute('''SELECT DISTINCT category FROM folder_mappings
+                    WHERE user_email = ?
+                    ORDER BY category''', (user_email,))
+    else:
+        c.execute('''SELECT DISTINCT category FROM folder_mappings
+                    ORDER BY category''')
+
+    rows = c.fetchall()
+    conn.close()
+    return [row[0] for row in rows]
+
+def add_folder_mapping(user_email: str, folder_name: str, category: str = None,
+                       auto_discovered: bool = True, message_count: int = 0):
+    """Add or update a folder mapping
+
+    Args:
+        user_email: Email address of the user
+        folder_name: IMAP folder name
+        category: Category label (defaults to folder name if not specified)
+        auto_discovered: Whether this was auto-discovered (vs. default/manual)
+        message_count: Number of messages in the folder
+    """
+    if category is None:
+        # Use folder name as category, convert to lowercase and remove special chars
+        category = folder_name.lower().replace('/', '_').replace(' ', '_')
+
+    conn = get_db()
+    c = conn.cursor()
+
+    # Check if mapping already exists
+    c.execute('''SELECT id FROM folder_mappings
+                WHERE user_email = ? AND folder_name = ?''',
+             (user_email, folder_name))
+
+    if c.fetchone():
+        # Update existing mapping
+        c.execute('''UPDATE folder_mappings
+                    SET category = ?, message_count = ?, last_checked = CURRENT_TIMESTAMP
+                    WHERE user_email = ? AND folder_name = ?''',
+                 (category, message_count, user_email, folder_name))
+    else:
+        # Insert new mapping
+        c.execute('''INSERT INTO folder_mappings
+                    (user_email, folder_name, category, auto_discovered, message_count)
+                    VALUES (?, ?, ?, ?, ?)''',
+                 (user_email, folder_name, category, auto_discovered, message_count))
+        print(f"✨ New folder discovered: '{folder_name}' → category '{category}' for {user_email}")
+
+    conn.commit()
+    conn.close()
+
+def get_folders_for_user(user_email: str) -> List[Tuple[str, str]]:
+    """Get all (category, folder_name) pairs for a user
+
+    Returns:
+        List of (category, folder_name) tuples
+    """
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('''SELECT category, folder_name FROM folder_mappings
+                WHERE user_email = ?
+                ORDER BY category''', (user_email,))
+    rows = c.fetchall()
+    conn.close()
+    return rows

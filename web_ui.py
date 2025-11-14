@@ -78,10 +78,20 @@ TEMPLATE = """
             border-radius: 3px;
             font-size: 12px;
             font-weight: bold;
+            background: #607D8B;
+            color: white;
         }
-        .personal { background: #2196F3; color: white; }
-        .shopping { background: #FF9800; color: white; }
-        .spam { background: #F44336; color: white; }
+        /* Default category colors */
+        .personal { background: #2196F3; }
+        .shopping { background: #FF9800; }
+        .spam { background: #F44336; }
+        .work { background: #9C27B0; }
+        .finance { background: #4CAF50; }
+        .social { background: #00BCD4; }
+        .newsletters { background: #795548; }
+        .receipts { background: #8BC34A; }
+        .important { background: #E91E63; }
+        .junk { background: #F44336; }
         .confidence {
             font-weight: bold;
         }
@@ -138,18 +148,12 @@ TEMPLATE = """
                 <div class="stat-label">Total Processed</div>
                 <div class="stat-value">{{ stats.total }}</div>
             </div>
+            {% for category in stats.all_categories %}
             <div class="stat-card">
-                <div class="stat-label">Personal</div>
-                <div class="stat-value">{{ stats.personal }}</div>
+                <div class="stat-label">{{ category|title }}</div>
+                <div class="stat-value">{{ stats.category_counts.get(category, 0) }}</div>
             </div>
-            <div class="stat-card">
-                <div class="stat-label">Shopping</div>
-                <div class="stat-value">{{ stats.shopping }}</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-label">Spam</div>
-                <div class="stat-value">{{ stats.spam }}</div>
-            </div>
+            {% endfor %}
             <div class="stat-card">
                 <div class="stat-label">Avg Processing</div>
                 <div class="stat-value">{{ "%.3f"|format(stats.avg_time) }}s</div>
@@ -230,9 +234,9 @@ TEMPLATE = """
             <thead>
                 <tr>
                     <th>User</th>
-                    <th>Personal</th>
-                    <th>Shopping</th>
-                    <th>Spam</th>
+                    {% for category in stats.all_categories %}
+                    <th>{{ category|title }}</th>
+                    {% endfor %}
                     <th>Total</th>
                 </tr>
             </thead>
@@ -240,9 +244,9 @@ TEMPLATE = """
                 {% for user_dist in training_dist %}
                 <tr>
                     <td>{{ user_dist.user }}</td>
-                    <td>{{ user_dist.personal }}</td>
-                    <td>{{ user_dist.shopping }}</td>
-                    <td>{{ user_dist.spam }}</td>
+                    {% for category in stats.all_categories %}
+                    <td>{{ user_dist.categories.get(category, 0) }}</td>
+                    {% endfor %}
                     <td><strong>{{ user_dist.total }}</strong></td>
                 </tr>
                 {% endfor %}
@@ -258,34 +262,33 @@ def dashboard():
     """Main dashboard"""
     conn = config.get_db()
     c = conn.cursor()
-    
+
     # Get overall stats
     c.execute('SELECT COUNT(*) FROM classifications')
     total = c.fetchone()[0]
-    
-    c.execute("SELECT COUNT(*) FROM classifications WHERE predicted_category = 'personal'")
-    personal = c.fetchone()[0]
-    
-    c.execute("SELECT COUNT(*) FROM classifications WHERE predicted_category = 'shopping'")
-    shopping = c.fetchone()[0]
-    
-    c.execute("SELECT COUNT(*) FROM classifications WHERE predicted_category = 'spam'")
-    spam = c.fetchone()[0]
-    
+
+    # Get all categories and their counts dynamically
+    c.execute('''SELECT predicted_category, COUNT(*)
+                 FROM classifications
+                 GROUP BY predicted_category''')
+    category_counts = {row[0]: row[1] for row in c.fetchall()}
+
     c.execute('SELECT AVG(processing_time) FROM classifications')
     avg_time = c.fetchone()[0] or 0
-    
+
     c.execute('SELECT COUNT(*) FROM training_data')
     training_count = c.fetchone()[0]
-    
+
     c.execute('SELECT COUNT(*) FROM reclassifications')
     reclassifications = c.fetchone()[0]
-    
+
+    # Get all known categories from folder_mappings
+    all_categories = config.get_all_categories()
+
     stats = {
         'total': total,
-        'personal': personal,
-        'shopping': shopping,
-        'spam': spam,
+        'category_counts': category_counts,
+        'all_categories': all_categories,
         'avg_time': avg_time,
         'training_count': training_count,
         'reclassifications': reclassifications
@@ -325,24 +328,26 @@ def dashboard():
             'processing_time': row[5]
         })
     
-    # Get training data distribution by user
-    c.execute('''SELECT user_email,
-                        SUM(CASE WHEN category = 'personal' THEN 1 ELSE 0 END) as personal,
-                        SUM(CASE WHEN category = 'shopping' THEN 1 ELSE 0 END) as shopping,
-                        SUM(CASE WHEN category = 'spam' THEN 1 ELSE 0 END) as spam,
-                        COUNT(*) as total
+    # Get training data distribution by user and category
+    c.execute('''SELECT user_email, category, COUNT(*)
                  FROM training_data
-                 GROUP BY user_email''')
-    
-    training_dist = []
+                 GROUP BY user_email, category
+                 ORDER BY user_email, category''')
+
+    # Organize training distribution by user
+    training_dist_data = {}
     for row in c.fetchall():
-        training_dist.append({
-            'user': row[0],
-            'personal': row[1],
-            'shopping': row[2],
-            'spam': row[3],
-            'total': row[4]
-        })
+        user = row[0]
+        category = row[1]
+        count = row[2]
+
+        if user not in training_dist_data:
+            training_dist_data[user] = {'user': user, 'categories': {}, 'total': 0}
+
+        training_dist_data[user]['categories'][category] = count
+        training_dist_data[user]['total'] += count
+
+    training_dist = list(training_dist_data.values())
     
     conn.close()
     
