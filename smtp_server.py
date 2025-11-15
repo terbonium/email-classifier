@@ -15,26 +15,41 @@ class ClassifierHandler:
     async def handle_DATA(self, server, session, envelope):
         """Handle incoming email for classification"""
         print(f"\nReceived email from {envelope.mail_from} to {envelope.rcpt_tos}")
-        
+
         # Get raw email content
         raw_email = envelope.content.decode('utf-8', errors='ignore')
-        
+
         # Determine user email from recipient
         user_email = envelope.rcpt_tos[0] if envelope.rcpt_tos else None
-        
-        # Classify the email
-        category, confidence, proc_time, message_id, subject = self.classifier.classify(
-            raw_email, user_email
-        )
-        
-        print(f"  Classification: {category} (confidence: {confidence:.2f}, time: {proc_time:.3f}s)")
-        print(f"  Subject: {subject}")
-        
-        # Log classification
-        config.log_classification(
-            message_id, user_email or 'unknown', subject, 
-            category, confidence, proc_time
-        )
+
+        # First, parse the email to extract message_id for deduplication check
+        text, subject, from_addr, message_id, msg = self.classifier.parse_email(raw_email)
+
+        # Check if this message has already been classified
+        existing = config.get_existing_classification(message_id, user_email)
+
+        if existing:
+            # Use existing classification to avoid duplicate processing
+            category = existing['category']
+            confidence = existing['confidence']
+            proc_time = existing['processing_time']
+            print(f"  ✓ Using existing classification (deduplication)")
+            print(f"  Classification: {category} (confidence: {confidence:.2f}, cached)")
+            print(f"  Subject: {subject}")
+        else:
+            # Classify the email
+            category, confidence, proc_time, message_id, subject = self.classifier.classify(
+                raw_email, user_email
+            )
+
+            print(f"  Classification: {category} (confidence: {confidence:.2f}, time: {proc_time:.3f}s)")
+            print(f"  Subject: {subject}")
+
+            # Log classification (only for new classifications)
+            config.log_classification(
+                message_id, user_email or 'unknown', subject,
+                category, confidence, proc_time
+            )
         
         # Add classification headers to email
         lines = raw_email.split('\n')
