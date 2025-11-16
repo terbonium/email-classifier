@@ -77,9 +77,14 @@ class EmailTrainer:
                         for msg_id in selected_messages:
                             raw_msg = client.fetch([msg_id], ['RFC822'])
                             email_body = raw_msg[msg_id][b'RFC822'].decode('utf-8', errors='ignore')
-                            
+
                             msg = email.message_from_string(email_body)
-                            message_id = msg.get('message-id', f'msg-{msg_id}')
+                            message_id = msg.get('message-id', '').strip()
+
+                            # Generate fallback Message-ID if missing (unique per user/folder/IMAP-ID)
+                            if not message_id:
+                                message_id = f'<generated-{user_email}-{folder}-{msg_id}@classifier.local>'
+
                             subject = self.decode_subject(msg.get('subject', ''))
                             
                             # Extract text
@@ -148,25 +153,34 @@ class EmailTrainer:
                             raw_msg = client.fetch([msg_id], ['RFC822'])
                             email_body = raw_msg[msg_id][b'RFC822'].decode('utf-8', errors='ignore')
                             msg = email.message_from_string(email_body)
-                            message_id = msg.get('message-id', '')
-                            
+                            message_id = msg.get('message-id', '').strip()
+
+                            # Skip messages without valid Message-ID to prevent false reclassifications
+                            if not message_id:
+                                continue
+
                             # If this message was in our training data but in a different category
                             if message_id in known_messages and known_messages[message_id] != category:
                                 old_category = known_messages[message_id]
                                 subject = self.decode_subject(msg.get('subject', ''))
-                                
+
                                 print(f"  📧 Reclassification: {old_category} → {category}")
                                 print(f"     Subject: {subject[:60]}...")
-                                
+                                print(f"     Message-ID: {message_id[:60]}...")
+
                                 # Log the reclassification
                                 config.log_reclassification(
                                     message_id, user_email, subject,
                                     old_category, category
                                 )
-                                
+
                                 # Update category in database
                                 c.execute('UPDATE training_data SET category = ? WHERE message_id = ?',
                                          (category, message_id))
+
+                                # Update the in-memory map to prevent re-detecting same change in subsequent folders
+                                known_messages[message_id] = category
+
                                 updated += 1
                     
                     except Exception as e:
