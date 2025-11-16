@@ -91,46 +91,12 @@ def get_db():
     """Get database connection"""
     return sqlite3.connect(DB_PATH)
 
-def get_existing_classification(message_id: str, user_email: str = None):
-    """Check if a message has already been classified and return the result"""
-    if not message_id:
-        return None
-
-    conn = get_db()
-    c = conn.cursor()
-
-    # Query for existing classification, optionally filtered by user
-    if user_email:
-        c.execute('''SELECT predicted_category, confidence, processing_time, subject
-                     FROM classifications
-                     WHERE message_id = ? AND user_email = ?
-                     ORDER BY timestamp DESC LIMIT 1''',
-                  (message_id, user_email))
-    else:
-        c.execute('''SELECT predicted_category, confidence, processing_time, subject
-                     FROM classifications
-                     WHERE message_id = ?
-                     ORDER BY timestamp DESC LIMIT 1''',
-                  (message_id,))
-
-    row = c.fetchone()
-    conn.close()
-
-    if row:
-        return {
-            'category': row[0],
-            'confidence': row[1],
-            'processing_time': row[2],
-            'subject': row[3]
-        }
-    return None
-
-def log_classification(message_id: str, user_email: str, subject: str,
+def log_classification(message_id: str, user_email: str, subject: str, 
                        predicted: str, confidence: float, processing_time: float):
     """Log a classification decision"""
     conn = get_db()
     c = conn.cursor()
-    c.execute('''INSERT INTO classifications
+    c.execute('''INSERT INTO classifications 
                  (message_id, user_email, subject, predicted_category, confidence, processing_time)
                  VALUES (?, ?, ?, ?, ?, ?)''',
               (message_id, user_email, subject, predicted, confidence, processing_time))
