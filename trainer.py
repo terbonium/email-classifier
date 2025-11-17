@@ -128,27 +128,30 @@ class EmailTrainer:
         """Check if users have moved emails, indicating reclassification"""
         conn = config.get_db()
         c = conn.cursor()
-        
+
         updated = 0
-        
+
         for user_email, password in config.IMAP_USERS:
             print(f"Checking for reclassifications by {user_email}...")
-            
+
             try:
                 client = imapclient.IMAPClient(config.IMAP_HOST, port=config.IMAP_PORT, ssl=True)
                 client.login(user_email, password)
-                
+
                 # Get all message IDs from training data for this user
                 c.execute('SELECT message_id, category FROM training_data WHERE user_email = ?',
                          (user_email,))
                 known_messages = {row[0]: row[1] for row in c.fetchall()}
-                
-                # Check current location of each message
+
+                # First pass: Build a map of where each message currently is
+                # This prevents duplicate processing when a message appears in multiple folders
+                current_locations = {}  # message_id -> (category, folder, subject)
+
                 for category, folder in config.FOLDER_MAP.items():
                     try:
                         client.select_folder(folder, readonly=True)
                         messages = client.search(['ALL'])
-                        
+
                         for msg_id in messages:
                             raw_msg = client.fetch([msg_id], ['RFC822'])
                             email_body = raw_msg[msg_id][b'RFC822'].decode('utf-8', errors='ignore')
@@ -159,50 +162,56 @@ class EmailTrainer:
                             if not message_id:
                                 continue
 
-                            # If this message was in our training data but in a different category
-                            if message_id in known_messages and known_messages[message_id] != category:
-                                old_category = known_messages[message_id]
-                                old_folder = config.FOLDER_MAP.get(old_category, 'Unknown')
-                                new_folder = folder
+                            # Only track messages that are in our training data
+                            if message_id in known_messages:
                                 subject = self.decode_subject(msg.get('subject', ''))
+                                # Store the current location (last one wins if message is in multiple folders)
+                                current_locations[message_id] = (category, folder, subject)
 
-                                print(f"\n  🔄 MESSAGE RECLASSIFICATION DETECTED")
-                                print(f"     Message-ID: {message_id}")
-                                print(f"     Subject: {subject}")
-                                print(f"     Original Category: {old_category} (folder: {old_folder})")
-                                print(f"     New Category: {category} (folder: {new_folder})")
-                                print(f"     User: {user_email}")
-                                print(f"     Action: Message moved from '{old_folder}' to '{new_folder}'\n")
-
-                                # Log the reclassification
-                                config.log_reclassification(
-                                    message_id, user_email, subject,
-                                    old_category, category, old_folder, new_folder
-                                )
-
-                                # Update category in database
-                                c.execute('UPDATE training_data SET category = ? WHERE message_id = ?',
-                                         (category, message_id))
-
-                                # Update the in-memory map to prevent re-detecting same change in subsequent folders
-                                known_messages[message_id] = category
-
-                                updated += 1
-                    
                     except Exception as e:
                         print(f"  Error checking folder {folder}: {e}")
-                
+
+                # Second pass: Process reclassifications based on final locations
+                for message_id, (new_category, new_folder, subject) in current_locations.items():
+                    old_category = known_messages[message_id]
+
+                    # Only log if the category actually changed
+                    if old_category != new_category:
+                        old_folder = config.FOLDER_MAP.get(old_category, 'Unknown')
+
+                        print(f"\n  🔄 MESSAGE RECLASSIFICATION DETECTED")
+                        print(f"     Message-ID: {message_id}")
+                        print(f"     Subject: {subject}")
+                        print(f"     Original Category: {old_category} (folder: {old_folder})")
+                        print(f"     New Category: {new_category} (folder: {new_folder})")
+                        print(f"     User: {user_email}")
+                        print(f"     Action: Message moved from '{old_folder}' to '{new_folder}'\n")
+
+                        # Log the reclassification
+                        config.log_reclassification(
+                            message_id, user_email, subject,
+                            old_category, new_category, old_folder, new_folder
+                        )
+
+                        # Update category in database
+                        try:
+                            c.execute('UPDATE training_data SET category = ? WHERE message_id = ?',
+                                     (new_category, message_id))
+                            updated += 1
+                        except Exception as e:
+                            print(f"  Error updating database for {message_id}: {e}")
+
                 client.logout()
-                
+
             except Exception as e:
                 print(f"Error connecting to IMAP for {user_email}: {e}")
-        
+
         conn.commit()
         conn.close()
-        
+
         if updated > 0:
             print(f"✅ Detected {updated} reclassifications")
-        
+
         return updated
     
     def retrain(self):
