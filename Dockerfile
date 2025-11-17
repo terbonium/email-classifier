@@ -4,6 +4,9 @@ FROM python:3.11-slim
 ARG GIT_BRANCH=main
 ARG REPO_URL=https://github.com/terbonium/email-classifier.git
 
+# Disable Python output buffering for real-time logs in Docker
+ENV PYTHONUNBUFFERED=1
+
 WORKDIR /app
 
 # Install system dependencies including git
