@@ -2,6 +2,7 @@ import imapclient
 import email
 from email.header import decode_header
 import time
+from datetime import datetime
 import config
 from classifier import EmailClassifier
 
@@ -237,28 +238,68 @@ class EmailTrainer:
         return success
     
     def training_loop(self):
-        """Main training loop"""
+        """Main training loop with scheduled retraining"""
         print("Starting training loop...")
-        
+
+        # Parse scheduled training time
+        try:
+            scheduled_hour, scheduled_minute = map(int, config.TRAINING_SCHEDULE.split(':'))
+            print(f"Scheduled training time: {scheduled_hour:02d}:{scheduled_minute:02d}")
+        except ValueError:
+            print(f"⚠️  Invalid TRAINING_SCHEDULE format: {config.TRAINING_SCHEDULE}")
+            print("   Using default: 3:00")
+            scheduled_hour, scheduled_minute = 3, 0
+
         # Initial training
         print("Fetching initial training data...")
         texts, labels = self.fetch_training_data()
-        
+
         if len(texts) >= len(config.CATEGORIES):
             print(f"Initial training with {len(texts)} messages...")
             self.classifier.train(texts, labels)
         else:
             print("Insufficient initial training data")
-        
-        # Periodic retraining
+
+        # Track last training date to avoid multiple trainings in same day
+        last_training_date = datetime.now().date()
+
+        # Periodic retraining check
         while True:
-            time.sleep(config.TRAINING_INTERVAL)
-            
-            print("\n=== Checking for reclassifications ===")
-            updated = self.check_reclassifications()
-            
-            if updated > 0:
-                print(f"Found {updated} reclassifications, retraining...")
-                self.retrain()
+            # Sleep for a shorter interval to check time more frequently
+            time.sleep(60)  # Check every minute
+
+            now = datetime.now()
+            current_time = now.time()
+            current_date = now.date()
+
+            # Check if it's the scheduled time and we haven't trained today yet
+            if (current_time.hour == scheduled_hour and
+                current_time.minute == scheduled_minute and
+                current_date != last_training_date):
+
+                print(f"\n=== Scheduled Training at {now.strftime('%Y-%m-%d %H:%M:%S')} ===")
+                print("Checking for reclassifications...")
+                updated = self.check_reclassifications()
+
+                if updated > 0:
+                    print(f"Found {updated} reclassifications, retraining...")
+                    self.retrain()
+                else:
+                    print("No reclassifications found, retraining with existing data...")
+                    self.retrain()
+
+                # Update last training date
+                last_training_date = current_date
+                print(f"Next scheduled training: {current_date.replace(day=current_date.day+1)} at {scheduled_hour:02d}:{scheduled_minute:02d}")
+
+            # Also support interval-based checks for immediate reclassifications
+            # Check every TRAINING_INTERVAL seconds for user-triggered retraining
+            if hasattr(self, 'last_interval_check'):
+                if time.time() - self.last_interval_check >= config.TRAINING_INTERVAL:
+                    print("\n=== Interval-based reclassification check ===")
+                    updated = self.check_reclassifications()
+                    if updated > 0:
+                        print(f"Found {updated} reclassifications outside scheduled time")
+                    self.last_interval_check = time.time()
             else:
-                print("No reclassifications found")
+                self.last_interval_check = time.time()

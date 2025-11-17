@@ -50,6 +50,11 @@ class ClassifierHandler:
                 message_id, user_email or 'unknown', subject,
                 category, confidence, proc_time
             )
+
+            # Add to training data so reclassifications can be detected
+            config.add_to_training_data(
+                message_id, user_email or 'unknown', subject, text, category
+            )
         
         # Add classification headers to email
         lines = raw_email.split('\n')

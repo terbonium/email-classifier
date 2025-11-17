@@ -9,6 +9,9 @@ IMAP_PORT = int(os.getenv('IMAP_PORT', 993))
 TRAINING_INTERVAL = int(os.getenv('TRAINING_INTERVAL', 3600))
 CONFIDENCE_THRESHOLD = float(os.getenv('CONFIDENCE_THRESHOLD', 0.7))
 MAX_TRAINING_EMAILS = int(os.getenv('MAX_TRAINING_EMAILS', 500))
+MAX_TOTAL_TRAINING_MESSAGES = int(os.getenv('MAX_TOTAL_TRAINING_MESSAGES', 10000))
+MAX_TRAINING_TIME_SECONDS = int(os.getenv('MAX_TRAINING_TIME_SECONDS', 300))
+TRAINING_SCHEDULE = os.getenv('TRAINING_SCHEDULE', '3:00')
 
 # SMTP Delivery settings (for forwarding classified emails)
 DELIVERY_HOST = os.getenv('DELIVERY_HOST', 'mailserver')
@@ -182,6 +185,37 @@ def log_reclassification(message_id: str, user_email: str, subject: str,
     print(f"   Subject: {subject}")
     print(f"   Classification Change: {old_category} → {new_category}")
     print(f"   IMAP Folder Move: '{old_folder}' → '{new_folder}'")
+
+def add_to_training_data(message_id: str, user_email: str, subject: str, body: str, category: str):
+    """Add a newly classified message to training data for reclassification tracking"""
+    conn = get_db()
+    c = conn.cursor()
+
+    # Insert or replace the message in training data
+    c.execute('''INSERT OR REPLACE INTO training_data
+                 (message_id, user_email, subject, body, category)
+                 VALUES (?, ?, ?, ?, ?)''',
+              (message_id, user_email, subject, body, category))
+
+    conn.commit()
+
+    # Check if we need to cleanup old messages to stay under the limit
+    c.execute('SELECT COUNT(*) FROM training_data')
+    total_count = c.fetchone()[0]
+
+    if total_count > MAX_TOTAL_TRAINING_MESSAGES:
+        # Delete oldest messages beyond the limit
+        excess = total_count - MAX_TOTAL_TRAINING_MESSAGES
+        c.execute('''DELETE FROM training_data
+                     WHERE id IN (
+                         SELECT id FROM training_data
+                         ORDER BY timestamp ASC
+                         LIMIT ?
+                     )''', (excess,))
+        conn.commit()
+        print(f"  🧹 Cleaned up {excess} old training messages (limit: {MAX_TOTAL_TRAINING_MESSAGES})")
+
+    conn.close()
 
 def get_user_weights(user_email: str) -> dict:
     """Get user's category weights"""
