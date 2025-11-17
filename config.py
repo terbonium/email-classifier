@@ -42,9 +42,12 @@ FOLDER_MAP = {
 def init_db():
     """Initialize SQLite database for tracking classifications and stats"""
     os.makedirs(DATA_DIR, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30.0)
     c = conn.cursor()
-    
+
+    # Enable WAL mode for better concurrent access
+    c.execute('PRAGMA journal_mode=WAL')
+
     # Classifications table
     c.execute('''CREATE TABLE IF NOT EXISTS classifications
                  (id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -56,7 +59,7 @@ def init_db():
                   actual_category TEXT,
                   processing_time REAL,
                   timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)''')
-    
+
     # Training data table
     c.execute('''CREATE TABLE IF NOT EXISTS training_data
                  (id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -66,14 +69,14 @@ def init_db():
                   body TEXT,
                   category TEXT,
                   timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)''')
-    
+
     # User preferences table
     c.execute('''CREATE TABLE IF NOT EXISTS user_preferences
                  (user_email TEXT PRIMARY KEY,
                   personal_weight REAL DEFAULT 1.0,
                   shopping_weight REAL DEFAULT 1.0,
                   spam_weight REAL DEFAULT 1.0)''')
-    
+
     # Reclassifications table - tracks when users move emails
     c.execute('''CREATE TABLE IF NOT EXISTS reclassifications
                  (id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -100,8 +103,11 @@ def init_db():
     conn.close()
 
 def get_db():
-    """Get database connection"""
-    return sqlite3.connect(DB_PATH)
+    """Get database connection with timeout for better concurrency handling"""
+    conn = sqlite3.connect(DB_PATH, timeout=30.0)
+    # Enable WAL mode for better concurrent access
+    conn.execute('PRAGMA journal_mode=WAL')
+    return conn
 
 def get_existing_classification(message_id: str, user_email: str = None):
     """Check if a message has already been classified and return the result"""
