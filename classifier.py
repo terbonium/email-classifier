@@ -2,6 +2,7 @@ import torch
 import pickle
 import os
 import warnings
+import threading
 from transformers import AutoTokenizer, AutoModel
 from sklearn.linear_model import LogisticRegression
 from email import message_from_string
@@ -159,13 +160,44 @@ class EmailClassifier:
         if len(texts) < len(config.CATEGORIES):
             print("Not enough training data yet")
             return False
-        
+
         print(f"Training on {len(texts)} emails...")
+        start_time = time.time()
+
+        # Extract features for all texts
+        print("  Extracting features...")
         features = [self.extract_features(text) for text in texts]
-        
-        self.classifier.fit(features, labels)
+        feature_time = time.time() - start_time
+        print(f"  Feature extraction completed in {feature_time:.2f}s")
+
+        # Train with timeout
+        print("  Training model...")
+        training_result = {'success': False, 'error': None}
+
+        def train_worker():
+            try:
+                self.classifier.fit(features, labels)
+                training_result['success'] = True
+            except Exception as e:
+                training_result['error'] = str(e)
+
+        thread = threading.Thread(target=train_worker)
+        thread.daemon = True
+        thread.start()
+        thread.join(timeout=config.MAX_TRAINING_TIME_SECONDS)
+
+        if thread.is_alive():
+            print(f"  ⚠️  Training timeout after {config.MAX_TRAINING_TIME_SECONDS}s - model training aborted")
+            return False
+
+        if not training_result['success']:
+            error = training_result.get('error', 'Unknown error')
+            print(f"  ✗ Training failed: {error}")
+            return False
+
+        training_time = time.time() - start_time
         self.save_model()
-        print("Training complete")
+        print(f"  ✓ Training complete in {training_time:.2f}s")
         return True
     
     def save_model(self):

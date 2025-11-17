@@ -167,7 +167,11 @@ All data stored in `/app/data`:
 - `IMAP_PORT`: IMAP port (default: 993)
 - `IMAP_USERS`: Comma-separated list of user:password pairs
 - `TRAINING_INTERVAL`: Seconds between retraining checks (default: 3600)
+- `TRAINING_SCHEDULE`: Daily training time in HH:MM format (default: "3:00")
 - `CONFIDENCE_THRESHOLD`: Minimum confidence for classification (default: 0.7)
+- `MAX_TRAINING_EMAILS`: Maximum emails per folder for initial training (default: 500)
+- `MAX_TOTAL_TRAINING_MESSAGES`: Maximum total messages in training database (default: 10000)
+- `MAX_TRAINING_TIME_SECONDS`: Maximum time allowed for model training (default: 300)
 
 ### Volumes
 
