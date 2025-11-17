@@ -5,6 +5,7 @@ services:
     build: .
     container_name: email-classifier
     environment:
+      - PYTHONUNBUFFERED=1
       - IMAP_HOST=${IMAP_HOST:-mail.example.com}
       - IMAP_PORT=${IMAP_PORT:-993}
       - IMAP_USERS=${IMAP_USERS:-user1@example.com:password1}
