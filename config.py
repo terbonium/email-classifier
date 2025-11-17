@@ -82,8 +82,20 @@ def init_db():
                   subject TEXT,
                   old_category TEXT,
                   new_category TEXT,
+                  old_folder TEXT,
+                  new_folder TEXT,
                   timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)''')
-    
+
+    # Migrate existing tables - add folder columns if they don't exist
+    try:
+        c.execute("SELECT old_folder FROM reclassifications LIMIT 1")
+    except sqlite3.OperationalError:
+        # Columns don't exist, add them
+        print("Migrating reclassifications table to add folder columns...")
+        c.execute("ALTER TABLE reclassifications ADD COLUMN old_folder TEXT")
+        c.execute("ALTER TABLE reclassifications ADD COLUMN new_folder TEXT")
+        print("Migration complete")
+
     conn.commit()
     conn.close()
 
@@ -138,17 +150,32 @@ def log_classification(message_id: str, user_email: str, subject: str,
     conn.close()
 
 def log_reclassification(message_id: str, user_email: str, subject: str,
-                         old_category: str, new_category: str):
+                         old_category: str, new_category: str,
+                         old_folder: str = None, new_folder: str = None):
     """Log when a user moves an email (reclassification detected)"""
+    # Default to category names if folders not provided
+    if old_folder is None:
+        old_folder = FOLDER_MAP.get(old_category, old_category)
+    if new_folder is None:
+        new_folder = FOLDER_MAP.get(new_category, new_category)
+
     conn = get_db()
     c = conn.cursor()
     c.execute('''INSERT INTO reclassifications
-                 (message_id, user_email, subject, old_category, new_category)
-                 VALUES (?, ?, ?, ?, ?)''',
-              (message_id, user_email, subject, old_category, new_category))
+                 (message_id, user_email, subject, old_category, new_category, old_folder, new_folder)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)''',
+              (message_id, user_email, subject, old_category, new_category, old_folder, new_folder))
     conn.commit()
     conn.close()
-    print(f"📝 Reclassification logged: {old_category} → {new_category} | {subject[:50]}")
+
+    # Verbose logging
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(f"📝 RECLASSIFICATION LOGGED [{timestamp}]")
+    print(f"   Message-ID: {message_id}")
+    print(f"   User: {user_email}")
+    print(f"   Subject: {subject}")
+    print(f"   Classification Change: {old_category} → {new_category}")
+    print(f"   IMAP Folder Move: '{old_folder}' → '{new_folder}'")
 
 def get_user_weights(user_email: str) -> dict:
     """Get user's category weights"""
