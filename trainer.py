@@ -162,16 +162,22 @@ class EmailTrainer:
                             # If this message was in our training data but in a different category
                             if message_id in known_messages and known_messages[message_id] != category:
                                 old_category = known_messages[message_id]
+                                old_folder = config.FOLDER_MAP.get(old_category, 'Unknown')
+                                new_folder = folder
                                 subject = self.decode_subject(msg.get('subject', ''))
 
-                                print(f"  📧 Reclassification: {old_category} → {category}")
-                                print(f"     Subject: {subject[:60]}...")
-                                print(f"     Message-ID: {message_id[:60]}...")
+                                print(f"\n  🔄 MESSAGE RECLASSIFICATION DETECTED")
+                                print(f"     Message-ID: {message_id}")
+                                print(f"     Subject: {subject}")
+                                print(f"     Original Category: {old_category} (folder: {old_folder})")
+                                print(f"     New Category: {category} (folder: {new_folder})")
+                                print(f"     User: {user_email}")
+                                print(f"     Action: Message moved from '{old_folder}' to '{new_folder}'\n")
 
                                 # Log the reclassification
                                 config.log_reclassification(
                                     message_id, user_email, subject,
-                                    old_category, category
+                                    old_category, category, old_folder, new_folder
                                 )
 
                                 # Update category in database
