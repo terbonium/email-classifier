@@ -66,42 +66,92 @@ class EmailClassifier:
         
         return text, subject, from_addr, message_id, msg
     
+    def apply_sender_heuristics(self, from_addr: str, probabilities: list) -> list:
+        """Apply sender-based heuristics to adjust classification probabilities"""
+        adjusted_probs = probabilities.copy()
+
+        # Extract domain from sender email
+        domain = from_addr.lower().split('@')[-1] if '@' in from_addr else ''
+
+        # Government and civic organization domains should be classified as personal, not shopping
+        civic_domains = ['.gov', '.edu', '.org']
+        civic_keywords = ['government', 'county', 'city', 'state', 'municipal', 'district', 'commissioner']
+
+        is_civic = False
+
+        # Check domain
+        for civic_domain in civic_domains:
+            if domain.endswith(civic_domain):
+                is_civic = True
+                break
+
+        # Check if domain contains civic keywords
+        if not is_civic:
+            for keyword in civic_keywords:
+                if keyword in domain:
+                    is_civic = True
+                    break
+
+        # If civic email, strongly bias away from shopping toward personal
+        if is_civic and 'shopping' in config.CATEGORIES:
+            shopping_idx = config.CATEGORIES.index('shopping')
+            personal_idx = config.CATEGORIES.index('personal') if 'personal' in config.CATEGORIES else 0
+
+            # Reduce shopping probability by 80%
+            shopping_prob = adjusted_probs[shopping_idx]
+            adjusted_probs[shopping_idx] = shopping_prob * 0.2
+
+            # Add the reduced probability to personal
+            adjusted_probs[personal_idx] += shopping_prob * 0.8
+
+            # Normalize
+            total = sum(adjusted_probs)
+            adjusted_probs = [p / total for p in adjusted_probs]
+
+        return adjusted_probs
+
     def classify(self, raw_email: str, user_email: str = None) -> tuple:
         """Classify an email and return category, confidence, processing time"""
         start_time = time.time()
-        
+
         text, subject, from_addr, message_id, msg = self.parse_email(raw_email)
         features = self.extract_features(text)
-        
+
         if self.classifier is None or not hasattr(self.classifier, 'classes_'):
             # No trained model yet, default to personal
             processing_time = time.time() - start_time
             return 'personal', 0.5, processing_time, message_id, subject
-        
+
         # Predict
         prediction = self.classifier.predict([features])[0]
         probabilities = self.classifier.predict_proba([features])[0]
-        
+
+        # Apply sender-based heuristics
+        probabilities = self.apply_sender_heuristics(from_addr, probabilities)
+
         # Apply user weights if available
         if user_email:
             weights = config.get_user_weights(user_email)
             weighted_probs = []
             for i, category in enumerate(config.CATEGORIES):
                 weighted_probs.append(probabilities[i] * weights.get(category, 1.0))
-            
+
             # Normalize
             total = sum(weighted_probs)
             weighted_probs = [p / total for p in weighted_probs]
-            
+
             # Get prediction from weighted probabilities
             max_idx = weighted_probs.index(max(weighted_probs))
             prediction = config.CATEGORIES[max_idx]
             confidence = weighted_probs[max_idx]
         else:
+            # Get prediction from heuristics-adjusted probabilities
+            max_idx = probabilities.tolist().index(max(probabilities))
+            prediction = config.CATEGORIES[max_idx]
             confidence = max(probabilities)
-        
+
         processing_time = time.time() - start_time
-        
+
         return prediction, confidence, processing_time, message_id, subject
     
     def train(self, texts: list, labels: list):
