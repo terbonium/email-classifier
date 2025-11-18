@@ -144,14 +144,26 @@ class EmailTrainer:
                          (user_email,))
                 known_messages = {row[0]: row[1] for row in c.fetchall()}
 
+                print(f"  📊 Tracking {len(known_messages)} emails in training database")
+                if len(known_messages) == 0:
+                    print(f"  ⚠️  No emails found in training_data for {user_email}")
+                    print(f"  ⚠️  Run 'Retrain Model' first to populate the training database")
+                    client.logout()
+                    continue
+
                 # First pass: Build a map of where each message currently is
                 # This prevents duplicate processing when a message appears in multiple folders
                 current_locations = {}  # message_id -> (category, folder, subject)
+
+                folder_stats = {}  # Track statistics for each folder
 
                 for category, folder in config.FOLDER_MAP.items():
                     try:
                         client.select_folder(folder, readonly=True)
                         messages = client.search(['ALL'])
+
+                        folder_matched = 0
+                        folder_total = len(messages)
 
                         for msg_id in messages:
                             raw_msg = client.fetch([msg_id], ['RFC822'])
@@ -168,11 +180,21 @@ class EmailTrainer:
                                 subject = self.decode_subject(msg.get('subject', ''))
                                 # Store the current location (last one wins if message is in multiple folders)
                                 current_locations[message_id] = (category, folder, subject)
+                                folder_matched += 1
+
+                        folder_stats[folder] = {'total': folder_total, 'matched': folder_matched}
+                        print(f"  📁 {folder}: {folder_total} emails, {folder_matched} matched training database")
 
                     except Exception as e:
                         print(f"  Error checking folder {folder}: {e}")
 
+                # Print summary statistics
+                total_matched = len(current_locations)
+                print(f"\n  📋 Summary: {total_matched} tracked emails found in current IMAP folders")
+                print(f"  📋 Comparing categories to detect reclassifications...")
+
                 # Second pass: Process reclassifications based on final locations
+                user_reclassifications = 0
                 for message_id, (new_category, new_folder, subject) in current_locations.items():
                     old_category = known_messages[message_id]
 
@@ -199,8 +221,13 @@ class EmailTrainer:
                             c.execute('UPDATE training_data SET category = ? WHERE message_id = ?',
                                      (new_category, message_id))
                             updated += 1
+                            user_reclassifications += 1
                         except Exception as e:
                             print(f"  Error updating database for {message_id}: {e}")
+
+                # Report if no reclassifications were found for this user
+                if user_reclassifications == 0:
+                    print(f"\n  ✅ No reclassifications detected - all emails are in their original categories")
 
                 client.logout()
 
