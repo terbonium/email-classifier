@@ -115,6 +115,17 @@ def init_db():
                   model_size_bytes INTEGER,
                   timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)''')
 
+    # Training status table - tracks ongoing training
+    c.execute('''CREATE TABLE IF NOT EXISTS training_status
+                 (id INTEGER PRIMARY KEY CHECK (id = 1),
+                  is_training INTEGER DEFAULT 0,
+                  started_at DATETIME,
+                  num_samples INTEGER,
+                  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP)''')
+
+    # Initialize with default row
+    c.execute('''INSERT OR IGNORE INTO training_status (id, is_training) VALUES (1, 0)''')
+
     conn.commit()
     conn.close()
 
@@ -296,3 +307,41 @@ def get_latest_model_stats():
             'last_trained': row[8]
         }
     return None
+
+def set_training_status(is_training: bool, num_samples: int = None):
+    """Set the training status"""
+    conn = get_db()
+    c = conn.cursor()
+    if is_training:
+        c.execute('''UPDATE training_status
+                     SET is_training = 1,
+                         started_at = CURRENT_TIMESTAMP,
+                         num_samples = ?,
+                         updated_at = CURRENT_TIMESTAMP
+                     WHERE id = 1''', (num_samples,))
+    else:
+        c.execute('''UPDATE training_status
+                     SET is_training = 0,
+                         updated_at = CURRENT_TIMESTAMP
+                     WHERE id = 1''')
+    conn.commit()
+    conn.close()
+
+def get_training_status():
+    """Get the current training status"""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('''SELECT is_training, started_at, num_samples, updated_at
+                 FROM training_status
+                 WHERE id = 1''')
+    row = c.fetchone()
+    conn.close()
+
+    if row:
+        return {
+            'is_training': bool(row[0]),
+            'started_at': row[1],
+            'num_samples': row[2],
+            'updated_at': row[3]
+        }
+    return {'is_training': False, 'started_at': None, 'num_samples': None, 'updated_at': None}

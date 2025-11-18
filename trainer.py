@@ -219,21 +219,28 @@ class EmailTrainer:
         """Retrain the model with current training data"""
         conn = config.get_db()
         c = conn.cursor()
-        
+
         # Get all training data
         c.execute('SELECT body, category FROM training_data')
         rows = c.fetchall()
-        
+
         if len(rows) < len(config.CATEGORIES):
             print("Not enough training data to retrain")
             return False
-        
+
         texts = [row[0] for row in rows]
         labels = [row[1] for row in rows]
-        
+
+        # Set training status before starting
+        config.set_training_status(True, len(texts))
+
         print(f"Retraining with {len(texts)} messages...")
         success = self.classifier.train(texts, labels)
-        
+
+        # Clear training status after completion (also cleared in classifier.train on failure)
+        if success:
+            config.set_training_status(False)
+
         conn.close()
         return success
     
@@ -256,7 +263,10 @@ class EmailTrainer:
 
         if len(texts) >= len(config.CATEGORIES):
             print(f"Initial training with {len(texts)} messages...")
-            self.classifier.train(texts, labels)
+            config.set_training_status(True, len(texts))
+            success = self.classifier.train(texts, labels)
+            if success:
+                config.set_training_status(False)
         else:
             print("Insufficient initial training data")
 
