@@ -2,7 +2,7 @@ import imapclient
 import email
 from email.header import decode_header
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 import config
 from classifier import EmailClassifier
 
@@ -155,14 +155,17 @@ class EmailTrainer:
                 # This prevents duplicate processing when a message appears in multiple folders
                 current_locations = {}  # message_id -> (category, folder, subject)
 
-                print(f"  🔍 Scanning IMAP folders to detect email movements...")
+                # Only scan emails from the last 30 days to improve performance
+                cutoff_date = datetime.now() - timedelta(days=30)
+                print(f"  🔍 Scanning IMAP folders for emails since {cutoff_date.strftime('%Y-%m-%d')}...")
                 folder_stats = {}  # Track statistics for each folder
 
                 for category, folder in config.FOLDER_MAP.items():
                     try:
                         print(f"  📂 Scanning {folder}...", end='', flush=True)
                         client.select_folder(folder, readonly=True)
-                        messages = client.search(['ALL'])
+                        # Use SINCE to only fetch emails from the last 30 days
+                        messages = client.search(['SINCE', cutoff_date.date()])
 
                         folder_matched = 0
                         folder_total = len(messages)
