@@ -215,7 +215,12 @@ TEMPLATE = """
         function refresh() {
             location.reload();
         }
-        setInterval(refresh, 30000); // Auto-refresh every 30 seconds
+        // Auto-refresh more frequently if training is in progress
+        {% if training_status and training_status.is_training %}
+        setInterval(refresh, 10000); // Refresh every 10 seconds during training
+        {% else %}
+        setInterval(refresh, 30000); // Refresh every 30 seconds normally
+        {% endif %}
 
         function showToast(message, isError = false) {
             const toast = document.getElementById('toast');
@@ -320,7 +325,25 @@ TEMPLATE = """
             </div>
         </div>
 
-        {% if model_stats %}
+        {% if training_status and training_status.is_training %}
+        <div class="model-stats-card">
+            <h3 style="margin-top: 0; color: #FF9800;">🔄 Training in Progress</h3>
+            <p style="color: #FF9800; font-size: 16px; margin: 10px 0;">
+                <strong>Model training is currently in progress...</strong>
+            </p>
+            <div style="background: #FFF3E0; padding: 15px; border-radius: 4px; margin-top: 10px;">
+                <div style="margin-bottom: 8px;">
+                    <strong>Training Samples:</strong> {{ training_status.num_samples }}
+                </div>
+                <div style="margin-bottom: 8px;">
+                    <strong>Started:</strong> {{ training_status.started_at }}
+                </div>
+                <div style="color: #666; font-size: 14px; margin-top: 12px;">
+                    Please wait... This may take a few minutes depending on the dataset size. The page will automatically refresh to show the results when training completes.
+                </div>
+            </div>
+        </div>
+        {% elif model_stats %}
         <div class="model-stats-card">
             <h3 style="margin-top: 0; color: #2196F3;">🤖 Model Statistics</h3>
             <div class="model-stats-grid">
@@ -551,13 +574,15 @@ def dashboard():
     
     conn.close()
 
-    # Get model stats
+    # Get model stats and training status
     model_stats = config.get_latest_model_stats()
+    training_status = config.get_training_status()
 
     return render_template_string(TEMPLATE, stats=stats, recent=recent,
                                  training_dist=training_dist,
                                  recent_reclassifications=recent_reclassifications,
-                                 model_stats=model_stats)
+                                 model_stats=model_stats,
+                                 training_status=training_status)
 
 @app.route('/api/stats')
 def api_stats():

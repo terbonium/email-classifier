@@ -159,6 +159,7 @@ class EmailClassifier:
         """Train the classifier with email texts and labels"""
         if len(texts) < len(config.CATEGORIES):
             print("Not enough training data yet")
+            config.set_training_status(False)
             return False
 
         print(f"Training on {len(texts)} emails...")
@@ -188,11 +189,13 @@ class EmailClassifier:
 
         if thread.is_alive():
             print(f"  ⚠️  Training timeout after {config.MAX_TRAINING_TIME_SECONDS}s - model training aborted")
+            config.set_training_status(False)
             return False
 
         if not training_result['success']:
             error = training_result.get('error', 'Unknown error')
             print(f"  ✗ Training failed: {error}")
+            config.set_training_status(False)
             return False
 
         training_time = time.time() - start_time
