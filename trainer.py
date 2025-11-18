@@ -155,17 +155,24 @@ class EmailTrainer:
                 # This prevents duplicate processing when a message appears in multiple folders
                 current_locations = {}  # message_id -> (category, folder, subject)
 
+                print(f"  🔍 Scanning IMAP folders to detect email movements...")
                 folder_stats = {}  # Track statistics for each folder
 
                 for category, folder in config.FOLDER_MAP.items():
                     try:
+                        print(f"  📂 Scanning {folder}...", end='', flush=True)
                         client.select_folder(folder, readonly=True)
                         messages = client.search(['ALL'])
 
                         folder_matched = 0
                         folder_total = len(messages)
+                        print(f" found {folder_total} emails", flush=True)
 
-                        for msg_id in messages:
+                        for idx, msg_id in enumerate(messages, 1):
+                            # Show progress every 100 emails
+                            if idx % 100 == 0:
+                                print(f"     Progress: {idx}/{folder_total} emails scanned...", flush=True)
+
                             raw_msg = client.fetch([msg_id], ['RFC822'])
                             email_body = raw_msg[msg_id][b'RFC822'].decode('utf-8', errors='ignore')
                             msg = email.message_from_string(email_body)
@@ -183,10 +190,10 @@ class EmailTrainer:
                                 folder_matched += 1
 
                         folder_stats[folder] = {'total': folder_total, 'matched': folder_matched}
-                        print(f"  📁 {folder}: {folder_total} emails, {folder_matched} matched training database")
+                        print(f"  ✅ {folder}: {folder_total} emails scanned, {folder_matched} matched training database")
 
                     except Exception as e:
-                        print(f"  Error checking folder {folder}: {e}")
+                        print(f"  ❌ Error checking folder {folder}: {e}")
 
                 # Print summary statistics
                 total_matched = len(current_locations)
