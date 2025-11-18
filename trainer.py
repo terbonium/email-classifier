@@ -176,9 +176,11 @@ class EmailTrainer:
                             if idx % 100 == 0:
                                 print(f"     Progress: {idx}/{folder_total} emails scanned...", flush=True)
 
-                            raw_msg = client.fetch([msg_id], ['RFC822'])
-                            email_body = raw_msg[msg_id][b'RFC822'].decode('utf-8', errors='ignore')
-                            msg = email.message_from_string(email_body)
+                            # Fetch only the headers we need (much faster than RFC822)
+                            raw_msg = client.fetch([msg_id], ['BODY.PEEK[HEADER.FIELDS (MESSAGE-ID SUBJECT)]'])
+                            header_data = raw_msg[msg_id][b'BODY[HEADER.FIELDS (MESSAGE-ID SUBJECT)]']
+                            header_str = header_data.decode('utf-8', errors='ignore')
+                            msg = email.message_from_string(header_str)
                             message_id = msg.get('message-id', '').strip()
 
                             # Skip messages without valid Message-ID to prevent false reclassifications
