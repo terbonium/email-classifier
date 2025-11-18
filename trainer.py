@@ -2,7 +2,7 @@ import imapclient
 import email
 from email.header import decode_header
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 import config
 from classifier import EmailClassifier
 
@@ -144,19 +144,43 @@ class EmailTrainer:
                          (user_email,))
                 known_messages = {row[0]: row[1] for row in c.fetchall()}
 
+                print(f"  📊 Tracking {len(known_messages)} emails in training database")
+                if len(known_messages) == 0:
+                    print(f"  ⚠️  No emails found in training_data for {user_email}")
+                    print(f"  ⚠️  Run 'Retrain Model' first to populate the training database")
+                    client.logout()
+                    continue
+
                 # First pass: Build a map of where each message currently is
                 # This prevents duplicate processing when a message appears in multiple folders
                 current_locations = {}  # message_id -> (category, folder, subject)
 
+                # Only scan emails from the last 30 days to improve performance
+                cutoff_date = datetime.now() - timedelta(days=30)
+                print(f"  🔍 Scanning IMAP folders for emails since {cutoff_date.strftime('%Y-%m-%d')}...")
+                folder_stats = {}  # Track statistics for each folder
+
                 for category, folder in config.FOLDER_MAP.items():
                     try:
+                        print(f"  📂 Scanning {folder}...", end='', flush=True)
                         client.select_folder(folder, readonly=True)
-                        messages = client.search(['ALL'])
+                        # Use SINCE to only fetch emails from the last 30 days
+                        messages = client.search(['SINCE', cutoff_date.date()])
 
-                        for msg_id in messages:
-                            raw_msg = client.fetch([msg_id], ['RFC822'])
-                            email_body = raw_msg[msg_id][b'RFC822'].decode('utf-8', errors='ignore')
-                            msg = email.message_from_string(email_body)
+                        folder_matched = 0
+                        folder_total = len(messages)
+                        print(f" found {folder_total} emails", flush=True)
+
+                        for idx, msg_id in enumerate(messages, 1):
+                            # Show progress every 100 emails
+                            if idx % 100 == 0:
+                                print(f"     Progress: {idx}/{folder_total} emails scanned...", flush=True)
+
+                            # Fetch only the headers we need (much faster than RFC822)
+                            raw_msg = client.fetch([msg_id], ['BODY.PEEK[HEADER.FIELDS (MESSAGE-ID SUBJECT)]'])
+                            header_data = raw_msg[msg_id][b'BODY[HEADER.FIELDS (MESSAGE-ID SUBJECT)]']
+                            header_str = header_data.decode('utf-8', errors='ignore')
+                            msg = email.message_from_string(header_str)
                             message_id = msg.get('message-id', '').strip()
 
                             # Skip messages without valid Message-ID to prevent false reclassifications
@@ -168,11 +192,21 @@ class EmailTrainer:
                                 subject = self.decode_subject(msg.get('subject', ''))
                                 # Store the current location (last one wins if message is in multiple folders)
                                 current_locations[message_id] = (category, folder, subject)
+                                folder_matched += 1
+
+                        folder_stats[folder] = {'total': folder_total, 'matched': folder_matched}
+                        print(f"  ✅ {folder}: {folder_total} emails scanned, {folder_matched} matched training database")
 
                     except Exception as e:
-                        print(f"  Error checking folder {folder}: {e}")
+                        print(f"  ❌ Error checking folder {folder}: {e}")
+
+                # Print summary statistics
+                total_matched = len(current_locations)
+                print(f"\n  📋 Summary: {total_matched} tracked emails found in current IMAP folders")
+                print(f"  📋 Comparing categories to detect reclassifications...")
 
                 # Second pass: Process reclassifications based on final locations
+                user_reclassifications = 0
                 for message_id, (new_category, new_folder, subject) in current_locations.items():
                     old_category = known_messages[message_id]
 
@@ -199,8 +233,13 @@ class EmailTrainer:
                             c.execute('UPDATE training_data SET category = ? WHERE message_id = ?',
                                      (new_category, message_id))
                             updated += 1
+                            user_reclassifications += 1
                         except Exception as e:
                             print(f"  Error updating database for {message_id}: {e}")
+
+                # Report if no reclassifications were found for this user
+                if user_reclassifications == 0:
+                    print(f"\n  ✅ No reclassifications detected - all emails are in their original categories")
 
                 client.logout()
 
