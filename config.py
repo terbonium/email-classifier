@@ -102,6 +102,19 @@ def init_db():
         c.execute("ALTER TABLE reclassifications ADD COLUMN new_folder TEXT")
         print("Migration complete")
 
+    # Model stats table - tracks training metadata
+    c.execute('''CREATE TABLE IF NOT EXISTS model_stats
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  model_name TEXT,
+                  training_time_seconds REAL,
+                  feature_extraction_time_seconds REAL,
+                  num_training_samples INTEGER,
+                  num_features INTEGER,
+                  num_classes INTEGER,
+                  num_coefficients INTEGER,
+                  model_size_bytes INTEGER,
+                  timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)''')
+
     conn.commit()
     conn.close()
 
@@ -234,10 +247,52 @@ def update_user_weights(user_email: str, weights: dict):
     """Update user's category weights"""
     conn = get_db()
     c = conn.cursor()
-    c.execute('''INSERT OR REPLACE INTO user_preferences 
+    c.execute('''INSERT OR REPLACE INTO user_preferences
                  (user_email, personal_weight, shopping_weight, spam_weight)
                  VALUES (?, ?, ?, ?)''',
-              (user_email, weights.get('personal', 1.0), 
+              (user_email, weights.get('personal', 1.0),
                weights.get('shopping', 1.0), weights.get('spam', 1.0)))
     conn.commit()
     conn.close()
+
+def log_model_stats(model_name: str, training_time: float, feature_time: float,
+                    num_samples: int, num_features: int, num_classes: int,
+                    num_coefficients: int, model_size: int):
+    """Log model training statistics"""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('''INSERT INTO model_stats
+                 (model_name, training_time_seconds, feature_extraction_time_seconds,
+                  num_training_samples, num_features, num_classes, num_coefficients, model_size_bytes)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+              (model_name, training_time, feature_time, num_samples, num_features,
+               num_classes, num_coefficients, model_size))
+    conn.commit()
+    conn.close()
+
+def get_latest_model_stats():
+    """Get the latest model statistics"""
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('''SELECT model_name, training_time_seconds, feature_extraction_time_seconds,
+                        num_training_samples, num_features, num_classes, num_coefficients,
+                        model_size_bytes, timestamp
+                 FROM model_stats
+                 ORDER BY timestamp DESC
+                 LIMIT 1''')
+    row = c.fetchone()
+    conn.close()
+
+    if row:
+        return {
+            'model_name': row[0],
+            'training_time': row[1],
+            'feature_time': row[2],
+            'num_samples': row[3],
+            'num_features': row[4],
+            'num_classes': row[5],
+            'num_coefficients': row[6],
+            'model_size': row[7],
+            'last_trained': row[8]
+        }
+    return None
