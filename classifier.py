@@ -197,7 +197,26 @@ class EmailClassifier:
 
         training_time = time.time() - start_time
         self.save_model()
+
+        # Collect and log model stats
+        num_features = len(features[0]) if features else 0
+        num_classes = len(self.classifier.classes_) if hasattr(self.classifier, 'classes_') else 0
+        num_coefficients = self.classifier.coef_.size if hasattr(self.classifier, 'coef_') else 0
+        model_size = os.path.getsize(self.model_path) if os.path.exists(self.model_path) else 0
+
+        config.log_model_stats(
+            model_name='LogisticRegression',
+            training_time=training_time,
+            feature_time=feature_time,
+            num_samples=len(texts),
+            num_features=num_features,
+            num_classes=num_classes,
+            num_coefficients=num_coefficients,
+            model_size=model_size
+        )
+
         print(f"  ✓ Training complete in {training_time:.2f}s")
+        print(f"  📊 Model stats: {num_features} features, {num_classes} classes, {num_coefficients} coefficients, {model_size:,} bytes")
         return True
     
     def save_model(self):

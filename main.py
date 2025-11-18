@@ -39,9 +39,9 @@ def main():
     print(f"Training interval: {config.TRAINING_INTERVAL} seconds")
     print(f"Configured users: {len(config.IMAP_USERS)}")
     print("="*60 + "\n")
-    
+
     # Start web UI (blocking)
-    run_web_ui()
+    run_web_ui(trainer=trainer, classifier=classifier)
 
 if __name__ == '__main__':
     main()
