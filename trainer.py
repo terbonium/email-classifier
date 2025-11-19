@@ -2,14 +2,53 @@ import imapclient
 import email
 from email.header import decode_header
 import time
+import threading
 from datetime import datetime, timedelta
 import config
 from classifier import EmailClassifier
+from imap_idle_monitor import IMAPIdleMonitorManager
 
 class EmailTrainer:
     def __init__(self, classifier: EmailClassifier):
         self.classifier = classifier
+        self.idle_monitor = None
+        self.reclassification_lock = threading.Lock()
+        self.last_idle_check_time = {}  # Track last check time per folder to avoid spam
     
+    def on_idle_change(self, folder: str, user_email: str):
+        """
+        Callback when IDLE detects changes in a folder.
+
+        Args:
+            folder: Folder name where changes were detected
+            user_email: User email account
+        """
+        # Rate limiting: Don't check too frequently per folder
+        folder_key = f"{user_email}/{folder}"
+        current_time = time.time()
+        last_check = self.last_idle_check_time.get(folder_key, 0)
+
+        if current_time - last_check < config.IDLE_RATE_LIMIT:
+            print(f"  ⏭️  Skipping IDLE check for {folder_key} (checked {int(current_time - last_check)}s ago)")
+            return
+
+        self.last_idle_check_time[folder_key] = current_time
+
+        print(f"\n🔔 IDLE detected changes in {folder} for {user_email}")
+        print(f"   Triggering real-time reclassification check...")
+
+        # Use lock to prevent concurrent reclassification checks
+        with self.reclassification_lock:
+            try:
+                updated = self.check_reclassifications()
+                if updated > 0:
+                    print(f"   ✅ Real-time check found {updated} reclassifications")
+                    print(f"   📝 Model will be retrained at next scheduled time")
+                else:
+                    print(f"   ✅ Real-time check complete - no reclassifications detected")
+            except Exception as e:
+                print(f"   ❌ Error during real-time reclassification check: {e}")
+
     def decode_subject(self, subject):
         """Decode email subject"""
         if subject is None:
@@ -284,7 +323,7 @@ class EmailTrainer:
         return success
     
     def training_loop(self):
-        """Main training loop with scheduled retraining"""
+        """Main training loop with scheduled retraining and real-time IDLE monitoring"""
         print("Starting training loop...")
 
         # Parse scheduled training time
@@ -309,46 +348,64 @@ class EmailTrainer:
         else:
             print("Insufficient initial training data")
 
+        # Start IMAP IDLE monitoring for real-time reclassification detection
+        if config.IDLE_ENABLED:
+            print("\n=== Starting Real-Time IMAP IDLE Monitoring ===")
+            try:
+                self.idle_monitor = IMAPIdleMonitorManager(on_change_callback=self.on_idle_change)
+                self.idle_monitor.start()
+                print("✅ IDLE monitoring started for real-time reclassification detection")
+                print("   Changes to INBOX, Shopping, and Junk folders will trigger immediate checks")
+                print(f"   IDLE timeout: {config.IDLE_TIMEOUT}s, Rate limit: {config.IDLE_RATE_LIMIT}s")
+            except Exception as e:
+                print(f"⚠️  Failed to start IDLE monitoring: {e}")
+                print("   Falling back to scheduled checks only")
+                self.idle_monitor = None
+        else:
+            print("\n⚠️  IDLE monitoring is disabled (IDLE_ENABLED=false)")
+            print("   Using scheduled checks only")
+            self.idle_monitor = None
+
         # Track last training date to avoid multiple trainings in same day
         last_training_date = datetime.now().date()
 
         # Periodic retraining check
-        while True:
-            # Sleep for a shorter interval to check time more frequently
-            time.sleep(60)  # Check every minute
+        try:
+            while True:
+                # Sleep for a shorter interval to check time more frequently
+                time.sleep(60)  # Check every minute
 
-            now = datetime.now()
-            current_time = now.time()
-            current_date = now.date()
+                now = datetime.now()
+                current_time = now.time()
+                current_date = now.date()
 
-            # Check if it's the scheduled time and we haven't trained today yet
-            if (current_time.hour == scheduled_hour and
-                current_time.minute == scheduled_minute and
-                current_date != last_training_date):
+                # Check if it's the scheduled time and we haven't trained today yet
+                if (current_time.hour == scheduled_hour and
+                    current_time.minute == scheduled_minute and
+                    current_date != last_training_date):
 
-                print(f"\n=== Scheduled Training at {now.strftime('%Y-%m-%d %H:%M:%S')} ===")
-                print("Checking for reclassifications...")
-                updated = self.check_reclassifications()
+                    print(f"\n=== Scheduled Training at {now.strftime('%Y-%m-%d %H:%M:%S')} ===")
 
-                if updated > 0:
-                    print(f"Found {updated} reclassifications, retraining...")
-                    self.retrain()
-                else:
-                    print("No reclassifications found, retraining with existing data...")
-                    self.retrain()
+                    # Perform nightly reclassification check before retraining
+                    print("Running nightly reclassification check...")
+                    with self.reclassification_lock:
+                        updated = self.check_reclassifications()
 
-                # Update last training date
-                last_training_date = current_date
-                print(f"Next scheduled training: {current_date.replace(day=current_date.day+1)} at {scheduled_hour:02d}:{scheduled_minute:02d}")
-
-            # Also support interval-based checks for immediate reclassifications
-            # Check every TRAINING_INTERVAL seconds for user-triggered retraining
-            if hasattr(self, 'last_interval_check'):
-                if time.time() - self.last_interval_check >= config.TRAINING_INTERVAL:
-                    print("\n=== Interval-based reclassification check ===")
-                    updated = self.check_reclassifications()
                     if updated > 0:
-                        print(f"Found {updated} reclassifications outside scheduled time")
-                    self.last_interval_check = time.time()
-            else:
-                self.last_interval_check = time.time()
+                        print(f"Found {updated} reclassifications, retraining...")
+                        self.retrain()
+                    else:
+                        print("No new reclassifications found, retraining with existing data...")
+                        self.retrain()
+
+                    # Update last training date
+                    last_training_date = current_date
+                    print(f"Next scheduled training: tomorrow at {scheduled_hour:02d}:{scheduled_minute:02d}")
+
+        except KeyboardInterrupt:
+            print("\n\n=== Shutting down training loop ===")
+            if self.idle_monitor:
+                print("Stopping IDLE monitor...")
+                self.idle_monitor.stop()
+            print("Shutdown complete")
+            raise

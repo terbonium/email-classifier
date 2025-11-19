@@ -6,7 +6,9 @@ A Docker-based email classification system using DistilBERT that learns from use
 
 - **Local LLM Classification**: Uses DistilBERT for privacy-focused, on-premise email classification
 - **Lightweight CPU-Only PyTorch**: Optimized for CPU inference (~140MB download vs 670MB CUDA version)
+- **Real-Time IMAP IDLE Monitoring**: Detects email reclassifications within seconds using IMAP IDLE protocol (RFC 2177)
 - **Continuous Learning**: Monitors IMAP folders and retrains when users move emails
+- **Hybrid Detection**: Combines real-time IDLE monitoring, nightly scheduled checks, and manual triggers
 - **Per-User Preferences**: Weights classifications based on individual user behavior
 - **Web Dashboard**: Real-time monitoring of classifications, stats, and training data
 - **SMTP Integration**: Receives emails via SMTP for classification before delivery
@@ -208,14 +210,37 @@ Create these folders in your mail client if they don't exist.
 
 ## Monitoring
 
-The web dashboard shows:
+### Web Dashboard
+
+The web dashboard (http://localhost:8080) shows:
 
 - Total emails processed
 - Category distribution
 - Average processing time
 - Training data count
 - Recent classifications (last 50)
+- Recent reclassifications (last 20)
 - Per-user training data distribution
+
+### Real-Time IMAP IDLE Monitoring
+
+The system now includes **real-time reclassification detection** using IMAP IDLE:
+
+- **Immediate Detection**: Changes detected within seconds when users move emails
+- **Multi-Folder Monitoring**: Monitors INBOX, Shopping, and Junk folders simultaneously
+- **Hybrid Approach**: Combines real-time IDLE, nightly scheduled checks, and manual triggers
+- **Thread-Safe**: Prevents concurrent checks with proper locking
+- **Auto-Recovery**: Automatic reconnection on network errors
+
+**Configuration:**
+```bash
+IDLE_ENABLED=true           # Enable IDLE monitoring (default)
+IDLE_TIMEOUT=1740          # IDLE timeout in seconds (29 min max)
+IDLE_RATE_LIMIT=30         # Min seconds between checks per folder
+TRAINING_SCHEDULE=3:00     # Daily retrain time
+```
+
+**See [IMAP_IDLE_MONITORING.md](IMAP_IDLE_MONITORING.md) for complete documentation.**
 
 ## Performance
 

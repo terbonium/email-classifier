@@ -13,6 +13,11 @@ MAX_TOTAL_TRAINING_MESSAGES = int(os.getenv('MAX_TOTAL_TRAINING_MESSAGES', 10000
 MAX_TRAINING_TIME_SECONDS = int(os.getenv('MAX_TRAINING_TIME_SECONDS', 300))
 TRAINING_SCHEDULE = os.getenv('TRAINING_SCHEDULE', '3:00')
 
+# IMAP IDLE Configuration
+IDLE_ENABLED = os.getenv('IDLE_ENABLED', 'true').lower() == 'true'
+IDLE_TIMEOUT = int(os.getenv('IDLE_TIMEOUT', 29 * 60))  # Default 29 minutes (RFC 2177 max)
+IDLE_RATE_LIMIT = int(os.getenv('IDLE_RATE_LIMIT', 30))  # Min seconds between checks per folder
+
 # SMTP Delivery settings (for forwarding classified emails)
 DELIVERY_HOST = os.getenv('DELIVERY_HOST', 'mailserver')
 DELIVERY_PORT = int(os.getenv('DELIVERY_PORT', 25))
