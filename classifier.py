@@ -6,6 +6,7 @@ import threading
 from transformers import AutoTokenizer, AutoModel
 from sklearn.linear_model import LogisticRegression
 from email import message_from_string
+from email.header import decode_header
 from email.utils import parseaddr
 import time
 import config
@@ -41,12 +42,26 @@ class EmailClassifier:
         
         return features.numpy()
     
+    def decode_subject(self, subject):
+        """Decode MIME-encoded email subject"""
+        if subject is None:
+            return ""
+        decoded = decode_header(subject)
+        parts = []
+        for content, encoding in decoded:
+            if isinstance(content, bytes):
+                parts.append(content.decode(encoding or 'utf-8', errors='ignore'))
+            else:
+                parts.append(content)
+        return ''.join(parts)
+
     def parse_email(self, raw_email: str) -> tuple:
         """Parse email and extract relevant text"""
         msg = message_from_string(raw_email)
-        
-        # Extract subject
-        subject = msg.get('subject', '')
+
+        # Extract and decode subject
+        raw_subject = msg.get('subject', '')
+        subject = self.decode_subject(raw_subject)
         
         # Extract body
         body = ''
