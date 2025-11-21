@@ -430,6 +430,20 @@ TEMPLATE = """
             history.replaceState(null, '', url.toString());
         }
 
+        function filterTrainingCategory(category) {
+            const url = new URL(window.location);
+            if (category) {
+                url.searchParams.set('training_category', category);
+            } else {
+                url.searchParams.delete('training_category');
+            }
+            // Reset to page 1 when changing filter
+            url.searchParams.delete('training_page');
+            // Stay on training history tab
+            url.searchParams.set('tab', 'training-history');
+            window.location.href = url.toString();
+        }
+
         // Restore active tab from URL on page load
         document.addEventListener('DOMContentLoaded', function() {
             const url = new URL(window.location);
@@ -720,7 +734,17 @@ TEMPLATE = """
                 {% endif %}
             </p>
 
-            <h3 style="margin-top: 20px;">Training Data (Emails in Training Folders) - {{ training_total }} total</h3>
+            <div style="margin: 15px 0; display: flex; align-items: center; gap: 10px;">
+                <label for="training-category-filter" style="font-weight: bold;">Filter by category:</label>
+                <select id="training-category-filter" onchange="filterTrainingCategory(this.value)" style="padding: 8px; border-radius: 4px; border: 1px solid #ddd;">
+                    <option value="" {% if not training_category %}selected{% endif %}>All Categories</option>
+                    <option value="personal" {% if training_category == 'personal' %}selected{% endif %}>Personal</option>
+                    <option value="shopping" {% if training_category == 'shopping' %}selected{% endif %}>Shopping</option>
+                    <option value="spam" {% if training_category == 'spam' %}selected{% endif %}>Spam</option>
+                </select>
+            </div>
+
+            <h3 style="margin-top: 20px;">Training Data (Emails in Training Folders) - {{ training_total }}{% if training_category %} {{ training_category }}{% endif %} total</h3>
             {% if training_history %}
             <table>
                 <thead>
@@ -751,13 +775,13 @@ TEMPLATE = """
             {% if training_total_pages > 1 %}
             <div class="pagination" style="margin-top: 15px;">
                 {% if training_page > 1 %}
-                <button onclick="window.location.href='?tab=training-history&training_page={{ training_page - 1 }}{% if selected_user %}&user={{ selected_user }}{% endif %}'">Previous</button>
+                <button onclick="window.location.href='?tab=training-history&training_page={{ training_page - 1 }}{% if selected_user %}&user={{ selected_user }}{% endif %}{% if training_category %}&training_category={{ training_category }}{% endif %}'">Previous</button>
                 {% else %}
                 <button disabled>Previous</button>
                 {% endif %}
                 <span style="margin: 0 15px;">Page {{ training_page }} of {{ training_total_pages }}</span>
                 {% if training_page < training_total_pages %}
-                <button onclick="window.location.href='?tab=training-history&training_page={{ training_page + 1 }}{% if selected_user %}&user={{ selected_user }}{% endif %}'">Next</button>
+                <button onclick="window.location.href='?tab=training-history&training_page={{ training_page + 1 }}{% if selected_user %}&user={{ selected_user }}{% endif %}{% if training_category %}&training_category={{ training_category }}{% endif %}'">Next</button>
                 {% else %}
                 <button disabled>Next</button>
                 {% endif %}
@@ -815,10 +839,11 @@ def dashboard():
     selected_user = request.args.get('user', '')
     users = get_all_users()
 
-    # Pagination for training history
+    # Pagination and filtering for training history
     training_page = request.args.get('training_page', 1, type=int)
     training_per_page = 100
     training_offset = (training_page - 1) * training_per_page
+    training_category = request.args.get('training_category', '')
 
     # Build WHERE clause for user filtering
     user_filter = ''
@@ -966,22 +991,30 @@ def dashboard():
             'processing_time': row[5]
         })
 
-    # Get training history (for training history tab) with pagination
+    # Get training history (for training history tab) with pagination and filtering
+    # Build WHERE clause for training history
+    training_conditions = []
+    training_params = []
     if selected_user:
-        c.execute('SELECT COUNT(*) FROM training_data WHERE user_email = ?', (selected_user,))
-        training_total = c.fetchone()[0]
-        c.execute('''SELECT timestamp, user_email, subject, category
-                     FROM training_data
-                     WHERE user_email = ?
-                     ORDER BY timestamp DESC
-                     LIMIT ? OFFSET ?''', (selected_user, training_per_page, training_offset))
-    else:
-        c.execute('SELECT COUNT(*) FROM training_data')
-        training_total = c.fetchone()[0]
-        c.execute('''SELECT timestamp, user_email, subject, category
-                     FROM training_data
-                     ORDER BY timestamp DESC
-                     LIMIT ? OFFSET ?''', (training_per_page, training_offset))
+        training_conditions.append('user_email = ?')
+        training_params.append(selected_user)
+    if training_category:
+        training_conditions.append('category = ?')
+        training_params.append(training_category)
+
+    training_where = ''
+    if training_conditions:
+        training_where = ' WHERE ' + ' AND '.join(training_conditions)
+
+    # Get count for pagination
+    c.execute(f'SELECT COUNT(*) FROM training_data{training_where}', training_params)
+    training_total = c.fetchone()[0]
+
+    # Get paginated results
+    c.execute(f'''SELECT timestamp, user_email, subject, category
+                 FROM training_data{training_where}
+                 ORDER BY timestamp DESC
+                 LIMIT ? OFFSET ?''', training_params + [training_per_page, training_offset])
 
     training_total_pages = (training_total + training_per_page - 1) // training_per_page
     training_history = []
@@ -1036,7 +1069,8 @@ def dashboard():
                                  user_reclassifications=user_reclassifications,
                                  training_page=training_page,
                                  training_total_pages=training_total_pages,
-                                 training_total=training_total)
+                                 training_total=training_total,
+                                 training_category=training_category)
 
 @app.route('/api/users')
 def api_users():
