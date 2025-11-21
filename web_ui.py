@@ -9,6 +9,26 @@ app = Flask(__name__)
 _trainer = None
 _classifier = None
 
+def get_all_users():
+    """Get list of all users from database"""
+    conn = config.get_db()
+    c = conn.cursor()
+
+    # Get users from classifications
+    c.execute('SELECT DISTINCT user_email FROM classifications WHERE user_email IS NOT NULL')
+    users = set(row[0] for row in c.fetchall())
+
+    # Also get users from training data
+    c.execute('SELECT DISTINCT user_email FROM training_data WHERE user_email IS NOT NULL')
+    users.update(row[0] for row in c.fetchall())
+
+    # Also get users from reclassifications
+    c.execute('SELECT DISTINCT user_email FROM reclassifications WHERE user_email IS NOT NULL')
+    users.update(row[0] for row in c.fetchall())
+
+    conn.close()
+    return sorted(list(users))
+
 # HTML template
 TEMPLATE = """
 <!DOCTYPE html>
@@ -210,6 +230,103 @@ TEMPLATE = """
             color: #2e7d32;
             margin-left: 10px;
         }
+        .user-selector {
+            background: #e3f2fd;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        .user-selector label {
+            font-weight: bold;
+            color: #1565c0;
+        }
+        .user-selector select {
+            padding: 8px 12px;
+            border-radius: 4px;
+            border: 1px solid #90caf9;
+            font-size: 14px;
+            min-width: 250px;
+        }
+        .user-info {
+            margin-left: auto;
+            color: #666;
+            font-size: 14px;
+        }
+        .tabs {
+            display: flex;
+            border-bottom: 2px solid #ddd;
+            margin: 20px 0 0 0;
+        }
+        .tab {
+            padding: 12px 24px;
+            cursor: pointer;
+            border: none;
+            background: none;
+            font-size: 14px;
+            font-weight: bold;
+            color: #666;
+            border-bottom: 3px solid transparent;
+            margin-bottom: -2px;
+        }
+        .tab:hover {
+            color: #4CAF50;
+        }
+        .tab.active {
+            color: #4CAF50;
+            border-bottom-color: #4CAF50;
+        }
+        .tab-content {
+            display: none;
+            padding: 20px 0;
+        }
+        .tab-content.active {
+            display: block;
+        }
+        .section-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        .section-header h2 {
+            margin: 0;
+        }
+        .pagination {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        .pagination button {
+            padding: 6px 12px;
+            border: 1px solid #ddd;
+            background: white;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .pagination button:hover {
+            background: #f5f5f5;
+        }
+        .pagination button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+            background: #f9f9f9;
+            border-radius: 8px;
+        }
+        .training-category {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 3px;
+            font-size: 12px;
+            font-weight: bold;
+        }
     </style>
     <script>
         function refresh() {
@@ -281,19 +398,81 @@ TEMPLATE = """
                     btn.textContent = 'Retrain Model';
                 });
         }
+
+        function changeUser() {
+            const selector = document.getElementById('user-select');
+            const selectedUser = selector.value;
+            const url = new URL(window.location);
+            if (selectedUser) {
+                url.searchParams.set('user', selectedUser);
+            } else {
+                url.searchParams.delete('user');
+            }
+            window.location.href = url.toString();
+        }
+
+        function switchTab(tabName) {
+            // Update tab buttons
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
+
+            // Update tab content
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.remove('active');
+            });
+            document.getElementById(`tab-${tabName}`).classList.add('active');
+
+            // Store active tab in URL
+            const url = new URL(window.location);
+            url.searchParams.set('tab', tabName);
+            history.replaceState(null, '', url.toString());
+        }
+
+        // Restore active tab from URL on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            const url = new URL(window.location);
+            const tab = url.searchParams.get('tab') || 'overview';
+            switchTab(tab);
+        });
     </script>
 </head>
 <body>
     <div id="toast" class="toast"></div>
     <div class="container">
-        <h1>📧 Email Classifier Dashboard</h1>
+        <h1>Email Classifier Dashboard</h1>
+
+        <div class="user-selector">
+            <label for="user-select">View Account:</label>
+            <select id="user-select" onchange="changeUser()">
+                <option value="">All Users (Aggregate)</option>
+                {% for user in users %}
+                <option value="{{ user }}" {% if selected_user == user %}selected{% endif %}>{{ user }}</option>
+                {% endfor %}
+            </select>
+            {% if selected_user %}
+            <span class="user-info">Showing data for: <strong>{{ selected_user }}</strong></span>
+            {% else %}
+            <span class="user-info">Showing aggregate data for all users</span>
+            {% endif %}
+        </div>
 
         <div class="button-group">
             <button class="refresh" onclick="refresh()">Refresh Dashboard</button>
-            <button id="btn-refresh-imap" class="btn-action" onclick="refreshIMAP()">🔄 Check for Reclassified Emails</button>
-            <button id="btn-retrain" class="btn-action btn-warning" onclick="retrainModel()">🤖 Retrain Model</button>
+            <button id="btn-refresh-imap" class="btn-action" onclick="refreshIMAP()">Check for Reclassified Emails</button>
+            <button id="btn-retrain" class="btn-action btn-warning" onclick="retrainModel()">Retrain Model</button>
         </div>
-        
+
+        <div class="tabs">
+            <button class="tab active" data-tab="overview" onclick="switchTab('overview')">Overview</button>
+            <button class="tab" data-tab="mail-history" onclick="switchTab('mail-history')">Mail History</button>
+            <button class="tab" data-tab="training-history" onclick="switchTab('training-history')">Training History</button>
+        </div>
+
+        <!-- Overview Tab -->
+        <div id="tab-overview" class="tab-content active">
+
         <div class="stats">
             <div class="stat-card">
                 <div class="stat-label">Total Processed</div>
@@ -476,6 +655,135 @@ TEMPLATE = """
                 {% endfor %}
             </tbody>
         </table>
+
+        </div><!-- End Overview Tab -->
+
+        <!-- Mail History Tab -->
+        <div id="tab-mail-history" class="tab-content">
+            <div class="section-header">
+                <h2>Mail Classification History</h2>
+            </div>
+            <p style="color: #666; font-size: 14px;">
+                {% if selected_user %}
+                Complete history of emails classified for {{ selected_user }}
+                {% else %}
+                Complete history of all classified emails. Select a user to filter.
+                {% endif %}
+            </p>
+
+            {% if mail_history %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>Timestamp</th>
+                        {% if not selected_user %}<th>User</th>{% endif %}
+                        <th>Subject</th>
+                        <th>Category</th>
+                        <th>Confidence</th>
+                        <th>Time (s)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for record in mail_history %}
+                    <tr>
+                        <td>{{ record.timestamp }}</td>
+                        {% if not selected_user %}<td>{{ record.user_email }}</td>{% endif %}
+                        <td>{{ record.subject[:80] }}{% if record.subject|length > 80 %}...{% endif %}</td>
+                        <td><span class="category {{ record.predicted_category }}">{{ record.predicted_category }}</span></td>
+                        <td>
+                            <span class="confidence {% if record.confidence > 0.8 %}high{% elif record.confidence > 0.6 %}medium{% else %}low{% endif %}">
+                                {{ "%.2f"|format(record.confidence) }}
+                            </span>
+                        </td>
+                        <td>{{ "%.3f"|format(record.processing_time) }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="empty-state">
+                <p>No mail history available{% if selected_user %} for {{ selected_user }}{% endif %}.</p>
+            </div>
+            {% endif %}
+        </div><!-- End Mail History Tab -->
+
+        <!-- Training History Tab -->
+        <div id="tab-training-history" class="tab-content">
+            <div class="section-header">
+                <h2>Training Classification History</h2>
+            </div>
+            <p style="color: #666; font-size: 14px;">
+                {% if selected_user %}
+                Training data and reclassifications for {{ selected_user }}. This data is used to train the model.
+                {% else %}
+                All training data across users. Select a user to see their specific training history.
+                {% endif %}
+            </p>
+
+            <h3 style="margin-top: 20px;">Training Data (Emails in Training Folders)</h3>
+            {% if training_history %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>Timestamp</th>
+                        {% if not selected_user %}<th>User</th>{% endif %}
+                        <th>Subject</th>
+                        <th>Category</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for record in training_history %}
+                    <tr>
+                        <td>{{ record.timestamp }}</td>
+                        {% if not selected_user %}<td>{{ record.user_email }}</td>{% endif %}
+                        <td>{{ record.subject[:80] }}{% if record.subject|length > 80 %}...{% endif %}</td>
+                        <td><span class="category {{ record.category }}">{{ record.category }}</span></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="empty-state">
+                <p>No training data available{% if selected_user %} for {{ selected_user }}{% endif %}.</p>
+            </div>
+            {% endif %}
+
+            <h3 style="margin-top: 30px;">Reclassification History (User Corrections)</h3>
+            <p style="color: #666; font-size: 14px;">When you move emails between folders, the system learns from these corrections.</p>
+            {% if user_reclassifications %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>Timestamp</th>
+                        {% if not selected_user %}<th>User</th>{% endif %}
+                        <th>Subject</th>
+                        <th>Movement</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for reclass in user_reclassifications %}
+                    <tr>
+                        <td>{{ reclass.timestamp }}</td>
+                        {% if not selected_user %}<td>{{ reclass.user_email }}</td>{% endif %}
+                        <td>{{ reclass.subject[:60] }}{% if reclass.subject|length > 60 %}...{% endif %}</td>
+                        <td>
+                            <div class="reclassification">
+                                <span class="category {{ reclass.old_category }}">{{ reclass.old_category }}</span>
+                                <span class="arrow">-></span>
+                                <span class="category {{ reclass.new_category }}">{{ reclass.new_category }}</span>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <div class="empty-state">
+                <p>No reclassifications recorded{% if selected_user %} for {{ selected_user }}{% endif %}.</p>
+            </div>
+            {% endif %}
+        </div><!-- End Training History Tab -->
+
     </div>
 </body>
 </html>
@@ -483,32 +791,46 @@ TEMPLATE = """
 
 @app.route('/')
 def dashboard():
-    """Main dashboard"""
+    """Main dashboard with user filtering support"""
     conn = config.get_db()
     c = conn.cursor()
-    
-    # Get overall stats
-    c.execute('SELECT COUNT(*) FROM classifications')
+
+    # Get selected user from query params
+    selected_user = request.args.get('user', '')
+    users = get_all_users()
+
+    # Build WHERE clause for user filtering
+    user_filter = ''
+    user_params = ()
+    if selected_user:
+        user_filter = ' WHERE user_email = ?'
+        user_params = (selected_user,)
+
+    # Get overall stats (filtered by user if selected)
+    c.execute(f'SELECT COUNT(*) FROM classifications{user_filter}', user_params)
     total = c.fetchone()[0]
-    
-    c.execute("SELECT COUNT(*) FROM classifications WHERE predicted_category = 'personal'")
+
+    c.execute(f"SELECT COUNT(*) FROM classifications{user_filter}{' AND' if user_filter else ' WHERE'} predicted_category = 'personal'",
+              user_params)
     personal = c.fetchone()[0]
-    
-    c.execute("SELECT COUNT(*) FROM classifications WHERE predicted_category = 'shopping'")
+
+    c.execute(f"SELECT COUNT(*) FROM classifications{user_filter}{' AND' if user_filter else ' WHERE'} predicted_category = 'shopping'",
+              user_params)
     shopping = c.fetchone()[0]
-    
-    c.execute("SELECT COUNT(*) FROM classifications WHERE predicted_category = 'spam'")
+
+    c.execute(f"SELECT COUNT(*) FROM classifications{user_filter}{' AND' if user_filter else ' WHERE'} predicted_category = 'spam'",
+              user_params)
     spam = c.fetchone()[0]
-    
-    c.execute('SELECT AVG(processing_time) FROM classifications')
+
+    c.execute(f'SELECT AVG(processing_time) FROM classifications{user_filter}', user_params)
     avg_time = c.fetchone()[0] or 0
-    
-    c.execute('SELECT COUNT(*) FROM training_data')
+
+    c.execute(f'SELECT COUNT(*) FROM training_data{user_filter}', user_params)
     training_count = c.fetchone()[0]
-    
-    c.execute('SELECT COUNT(*) FROM reclassifications')
+
+    c.execute(f'SELECT COUNT(*) FROM reclassifications{user_filter}', user_params)
     reclassifications = c.fetchone()[0]
-    
+
     stats = {
         'total': total,
         'personal': personal,
@@ -518,13 +840,20 @@ def dashboard():
         'training_count': training_count,
         'reclassifications': reclassifications
     }
-    
-    # Get recent reclassifications
-    c.execute('''SELECT timestamp, user_email, subject, old_category, new_category 
-                 FROM reclassifications 
-                 ORDER BY timestamp DESC 
-                 LIMIT 20''')
-    
+
+    # Get recent reclassifications (for overview tab)
+    if selected_user:
+        c.execute('''SELECT timestamp, user_email, subject, old_category, new_category
+                     FROM reclassifications
+                     WHERE user_email = ?
+                     ORDER BY timestamp DESC
+                     LIMIT 20''', (selected_user,))
+    else:
+        c.execute('''SELECT timestamp, user_email, subject, old_category, new_category
+                     FROM reclassifications
+                     ORDER BY timestamp DESC
+                     LIMIT 20''')
+
     recent_reclassifications = []
     for row in c.fetchall():
         recent_reclassifications.append({
@@ -534,14 +863,22 @@ def dashboard():
             'old_category': row[3],
             'new_category': row[4]
         })
-    
-    # Get recent classifications
-    c.execute('''SELECT timestamp, user_email, subject, predicted_category, 
-                        confidence, processing_time 
-                 FROM classifications 
-                 ORDER BY timestamp DESC 
-                 LIMIT 50''')
-    
+
+    # Get recent classifications (for overview tab)
+    if selected_user:
+        c.execute('''SELECT timestamp, user_email, subject, predicted_category,
+                            confidence, processing_time
+                     FROM classifications
+                     WHERE user_email = ?
+                     ORDER BY timestamp DESC
+                     LIMIT 50''', (selected_user,))
+    else:
+        c.execute('''SELECT timestamp, user_email, subject, predicted_category,
+                            confidence, processing_time
+                     FROM classifications
+                     ORDER BY timestamp DESC
+                     LIMIT 50''')
+
     recent = []
     for row in c.fetchall():
         recent.append({
@@ -552,16 +889,26 @@ def dashboard():
             'confidence': row[4],
             'processing_time': row[5]
         })
-    
+
     # Get training data distribution by user
-    c.execute('''SELECT user_email,
-                        SUM(CASE WHEN category = 'personal' THEN 1 ELSE 0 END) as personal,
-                        SUM(CASE WHEN category = 'shopping' THEN 1 ELSE 0 END) as shopping,
-                        SUM(CASE WHEN category = 'spam' THEN 1 ELSE 0 END) as spam,
-                        COUNT(*) as total
-                 FROM training_data
-                 GROUP BY user_email''')
-    
+    if selected_user:
+        c.execute('''SELECT user_email,
+                            SUM(CASE WHEN category = 'personal' THEN 1 ELSE 0 END) as personal,
+                            SUM(CASE WHEN category = 'shopping' THEN 1 ELSE 0 END) as shopping,
+                            SUM(CASE WHEN category = 'spam' THEN 1 ELSE 0 END) as spam,
+                            COUNT(*) as total
+                     FROM training_data
+                     WHERE user_email = ?
+                     GROUP BY user_email''', (selected_user,))
+    else:
+        c.execute('''SELECT user_email,
+                            SUM(CASE WHEN category = 'personal' THEN 1 ELSE 0 END) as personal,
+                            SUM(CASE WHEN category = 'shopping' THEN 1 ELSE 0 END) as shopping,
+                            SUM(CASE WHEN category = 'spam' THEN 1 ELSE 0 END) as spam,
+                            COUNT(*) as total
+                     FROM training_data
+                     GROUP BY user_email''')
+
     training_dist = []
     for row in c.fetchall():
         training_dist.append({
@@ -571,55 +918,240 @@ def dashboard():
             'spam': row[3],
             'total': row[4]
         })
-    
+
+    # Get mail history (for mail history tab) - more records
+    if selected_user:
+        c.execute('''SELECT timestamp, user_email, subject, predicted_category,
+                            confidence, processing_time
+                     FROM classifications
+                     WHERE user_email = ?
+                     ORDER BY timestamp DESC
+                     LIMIT 200''', (selected_user,))
+    else:
+        c.execute('''SELECT timestamp, user_email, subject, predicted_category,
+                            confidence, processing_time
+                     FROM classifications
+                     ORDER BY timestamp DESC
+                     LIMIT 200''')
+
+    mail_history = []
+    for row in c.fetchall():
+        mail_history.append({
+            'timestamp': row[0],
+            'user_email': row[1],
+            'subject': row[2] or 'No subject',
+            'predicted_category': row[3],
+            'confidence': row[4],
+            'processing_time': row[5]
+        })
+
+    # Get training history (for training history tab)
+    if selected_user:
+        c.execute('''SELECT timestamp, user_email, subject, category
+                     FROM training_data
+                     WHERE user_email = ?
+                     ORDER BY timestamp DESC
+                     LIMIT 200''', (selected_user,))
+    else:
+        c.execute('''SELECT timestamp, user_email, subject, category
+                     FROM training_data
+                     ORDER BY timestamp DESC
+                     LIMIT 200''')
+
+    training_history = []
+    for row in c.fetchall():
+        training_history.append({
+            'timestamp': row[0],
+            'user_email': row[1],
+            'subject': row[2] or 'No subject',
+            'category': row[3]
+        })
+
+    # Get user reclassifications (for training history tab)
+    if selected_user:
+        c.execute('''SELECT timestamp, user_email, subject, old_category, new_category
+                     FROM reclassifications
+                     WHERE user_email = ?
+                     ORDER BY timestamp DESC
+                     LIMIT 100''', (selected_user,))
+    else:
+        c.execute('''SELECT timestamp, user_email, subject, old_category, new_category
+                     FROM reclassifications
+                     ORDER BY timestamp DESC
+                     LIMIT 100''')
+
+    user_reclassifications = []
+    for row in c.fetchall():
+        user_reclassifications.append({
+            'timestamp': row[0],
+            'user_email': row[1],
+            'subject': row[2] or 'No subject',
+            'old_category': row[3],
+            'new_category': row[4]
+        })
+
     conn.close()
 
     # Get model stats and training status
     model_stats = config.get_latest_model_stats()
     training_status = config.get_training_status()
 
-    return render_template_string(TEMPLATE, stats=stats, recent=recent,
+    return render_template_string(TEMPLATE,
+                                 stats=stats,
+                                 recent=recent,
                                  training_dist=training_dist,
                                  recent_reclassifications=recent_reclassifications,
                                  model_stats=model_stats,
-                                 training_status=training_status)
+                                 training_status=training_status,
+                                 users=users,
+                                 selected_user=selected_user,
+                                 mail_history=mail_history,
+                                 training_history=training_history,
+                                 user_reclassifications=user_reclassifications)
+
+@app.route('/api/users')
+def api_users():
+    """API endpoint to get list of all users"""
+    users = get_all_users()
+    return jsonify({'users': users})
 
 @app.route('/api/stats')
 def api_stats():
-    """API endpoint for stats"""
+    """API endpoint for stats (supports user filtering)"""
+    user_email = request.args.get('user', '')
+
     conn = config.get_db()
     c = conn.cursor()
-    
-    c.execute('SELECT COUNT(*) FROM classifications')
-    total = c.fetchone()[0]
-    
-    c.execute('SELECT AVG(processing_time) FROM classifications')
-    avg_time = c.fetchone()[0] or 0
-    
-    c.execute('SELECT COUNT(*) FROM reclassifications')
-    reclassifications = c.fetchone()[0]
-    
+
+    if user_email:
+        c.execute('SELECT COUNT(*) FROM classifications WHERE user_email = ?', (user_email,))
+        total = c.fetchone()[0]
+
+        c.execute('SELECT AVG(processing_time) FROM classifications WHERE user_email = ?', (user_email,))
+        avg_time = c.fetchone()[0] or 0
+
+        c.execute('SELECT COUNT(*) FROM reclassifications WHERE user_email = ?', (user_email,))
+        reclassifications = c.fetchone()[0]
+
+        c.execute('SELECT COUNT(*) FROM training_data WHERE user_email = ?', (user_email,))
+        training_count = c.fetchone()[0]
+    else:
+        c.execute('SELECT COUNT(*) FROM classifications')
+        total = c.fetchone()[0]
+
+        c.execute('SELECT AVG(processing_time) FROM classifications')
+        avg_time = c.fetchone()[0] or 0
+
+        c.execute('SELECT COUNT(*) FROM reclassifications')
+        reclassifications = c.fetchone()[0]
+
+        c.execute('SELECT COUNT(*) FROM training_data')
+        training_count = c.fetchone()[0]
+
     conn.close()
-    
+
     return jsonify({
         'total': total,
         'avg_time': avg_time,
+        'reclassifications': reclassifications,
+        'training_count': training_count,
+        'user': user_email or 'all'
+    })
+
+@app.route('/api/user/<user_email>/mail-history')
+def api_user_mail_history(user_email):
+    """API endpoint for user-specific mail classification history"""
+    limit = request.args.get('limit', 200, type=int)
+
+    conn = config.get_db()
+    c = conn.cursor()
+
+    c.execute('''SELECT timestamp, subject, predicted_category, confidence, processing_time
+                 FROM classifications
+                 WHERE user_email = ?
+                 ORDER BY timestamp DESC
+                 LIMIT ?''', (user_email, limit))
+
+    history = []
+    for row in c.fetchall():
+        history.append({
+            'timestamp': row[0],
+            'subject': row[1],
+            'predicted_category': row[2],
+            'confidence': row[3],
+            'processing_time': row[4]
+        })
+
+    conn.close()
+
+    return jsonify({'user': user_email, 'mail_history': history, 'count': len(history)})
+
+@app.route('/api/user/<user_email>/training-history')
+def api_user_training_history(user_email):
+    """API endpoint for user-specific training data history"""
+    limit = request.args.get('limit', 200, type=int)
+
+    conn = config.get_db()
+    c = conn.cursor()
+
+    c.execute('''SELECT timestamp, subject, category
+                 FROM training_data
+                 WHERE user_email = ?
+                 ORDER BY timestamp DESC
+                 LIMIT ?''', (user_email, limit))
+
+    training_data = []
+    for row in c.fetchall():
+        training_data.append({
+            'timestamp': row[0],
+            'subject': row[1],
+            'category': row[2]
+        })
+
+    c.execute('''SELECT timestamp, subject, old_category, new_category
+                 FROM reclassifications
+                 WHERE user_email = ?
+                 ORDER BY timestamp DESC
+                 LIMIT ?''', (user_email, limit))
+
+    reclassifications = []
+    for row in c.fetchall():
+        reclassifications.append({
+            'timestamp': row[0],
+            'subject': row[1],
+            'old_category': row[2],
+            'new_category': row[3]
+        })
+
+    conn.close()
+
+    return jsonify({
+        'user': user_email,
+        'training_data': training_data,
         'reclassifications': reclassifications
     })
 
 @app.route('/api/reclassifications')
 def api_reclassifications():
-    """API endpoint for recent reclassifications"""
+    """API endpoint for recent reclassifications (supports user filtering)"""
     limit = request.args.get('limit', 50, type=int)
-    
+    user_email = request.args.get('user', '')
+
     conn = config.get_db()
     c = conn.cursor()
-    
-    c.execute('''SELECT timestamp, user_email, subject, old_category, new_category 
-                 FROM reclassifications 
-                 ORDER BY timestamp DESC 
-                 LIMIT ?''', (limit,))
-    
+
+    if user_email:
+        c.execute('''SELECT timestamp, user_email, subject, old_category, new_category
+                     FROM reclassifications
+                     WHERE user_email = ?
+                     ORDER BY timestamp DESC
+                     LIMIT ?''', (user_email, limit))
+    else:
+        c.execute('''SELECT timestamp, user_email, subject, old_category, new_category
+                     FROM reclassifications
+                     ORDER BY timestamp DESC
+                     LIMIT ?''', (limit,))
+
     reclassifications = []
     for row in c.fetchall():
         reclassifications.append({
@@ -629,9 +1161,9 @@ def api_reclassifications():
             'old_category': row[3],
             'new_category': row[4]
         })
-    
+
     conn.close()
-    
+
     return jsonify(reclassifications)
 
 @app.route('/api/refresh-imap', methods=['POST'])
