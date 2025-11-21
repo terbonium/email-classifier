@@ -127,16 +127,20 @@ class EmailClassifier:
         return adjusted_probs
 
     def classify(self, raw_email: str, user_email: str = None) -> tuple:
-        """Classify an email and return category, confidence, processing time"""
+        """Classify an email and return category, confidence, processing time, and probability breakdown"""
         start_time = time.time()
 
         text, subject, from_addr, message_id, msg = self.parse_email(raw_email)
         features = self.extract_features(text)
 
+        # Extract sender domain for explainability
+        sender_domain = from_addr.lower().split('@')[-1] if '@' in from_addr else ''
+
         if self.classifier is None or not hasattr(self.classifier, 'classes_'):
             # No trained model yet, default to personal
             processing_time = time.time() - start_time
-            return 'personal', 0.5, processing_time, message_id, subject
+            default_probs = {'personal': 0.5, 'shopping': 0.25, 'spam': 0.25}
+            return 'personal', 0.5, processing_time, message_id, subject, default_probs, sender_domain
 
         # Predict
         prediction = self.classifier.predict([features])[0]
@@ -160,15 +164,24 @@ class EmailClassifier:
             max_idx = weighted_probs.index(max(weighted_probs))
             prediction = config.CATEGORIES[max_idx]
             confidence = weighted_probs[max_idx]
+            final_probs = weighted_probs
         else:
             # Get prediction from heuristics-adjusted probabilities
-            max_idx = probabilities.tolist().index(max(probabilities))
+            if hasattr(probabilities, 'tolist'):
+                prob_list = probabilities.tolist()
+            else:
+                prob_list = list(probabilities)
+            max_idx = prob_list.index(max(prob_list))
             prediction = config.CATEGORIES[max_idx]
-            confidence = max(probabilities)
+            confidence = max(prob_list)
+            final_probs = prob_list
+
+        # Create probability dictionary for explainability
+        prob_dict = {config.CATEGORIES[i]: final_probs[i] for i in range(len(config.CATEGORIES))}
 
         processing_time = time.time() - start_time
 
-        return prediction, confidence, processing_time, message_id, subject
+        return prediction, confidence, processing_time, message_id, subject, prob_dict, sender_domain
     
     def train(self, texts: list, labels: list):
         """Train the classifier with email texts and labels"""

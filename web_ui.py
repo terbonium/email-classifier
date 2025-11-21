@@ -327,9 +327,136 @@ TEMPLATE = """
             font-size: 12px;
             font-weight: bold;
         }
+        /* Modal styles */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+        .modal-overlay.show {
+            display: flex;
+        }
+        .modal {
+            background: white;
+            border-radius: 8px;
+            max-width: 800px;
+            width: 90%;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+        }
+        .modal-header {
+            padding: 20px;
+            border-bottom: 1px solid #ddd;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .modal-header h3 {
+            margin: 0;
+            color: #333;
+        }
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: #666;
+            padding: 0;
+            line-height: 1;
+        }
+        .modal-close:hover {
+            color: #333;
+        }
+        .modal-body {
+            padding: 20px;
+        }
+        .detail-section {
+            margin-bottom: 20px;
+        }
+        .detail-section h4 {
+            margin: 0 0 10px 0;
+            color: #555;
+            font-size: 14px;
+            text-transform: uppercase;
+        }
+        .detail-content {
+            background: #f9f9f9;
+            padding: 15px;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+        .prob-bar-container {
+            margin: 8px 0;
+        }
+        .prob-label {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 4px;
+            font-size: 13px;
+        }
+        .prob-bar {
+            height: 20px;
+            background: #e0e0e0;
+            border-radius: 3px;
+            overflow: hidden;
+        }
+        .prob-fill {
+            height: 100%;
+            border-radius: 3px;
+            transition: width 0.3s ease;
+        }
+        .prob-fill.personal { background: #2196F3; }
+        .prob-fill.shopping { background: #FF9800; }
+        .prob-fill.spam { background: #F44336; }
+        .prob-fill.winner { box-shadow: 0 0 0 2px #333; }
+        .explanation-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        .explanation-list li {
+            padding: 8px 0;
+            border-bottom: 1px solid #eee;
+            font-size: 14px;
+        }
+        .explanation-list li:last-child {
+            border-bottom: none;
+        }
+        .clickable-row {
+            cursor: pointer;
+        }
+        .clickable-row:hover {
+            background: #e3f2fd !important;
+        }
+        .body-preview {
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            font-family: monospace;
+            font-size: 12px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
     </style>
     <script>
+        // Track if modal is open to pause auto-refresh
+        let isModalOpen = false;
+
         function refresh() {
+            // Don't refresh if modal is open
+            if (isModalOpen) return;
             location.reload();
         }
         // Auto-refresh more frequently if training is in progress
@@ -450,10 +577,178 @@ TEMPLATE = """
             const tab = url.searchParams.get('tab') || 'overview';
             switchTab(tab);
         });
+
+        // Modal functions
+        function openClassificationModal(classificationId) {
+            const modal = document.getElementById('classification-modal');
+            const modalBody = document.getElementById('modal-body-content');
+
+            // Show modal with loading state
+            modal.classList.add('show');
+            isModalOpen = true;
+            modalBody.innerHTML = '<div class="loading">Loading classification details...</div>';
+
+            // Fetch classification details
+            fetch(`/api/classification/${classificationId}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.error) {
+                        modalBody.innerHTML = `<div class="loading">Error: ${data.error}</div>`;
+                        return;
+                    }
+
+                    // Build modal content
+                    let html = '';
+
+                    // Email header section
+                    html += `
+                        <div class="detail-section">
+                            <h4>Email Details</h4>
+                            <div class="detail-content">
+                                <p><strong>Subject:</strong> ${escapeHtml(data.subject)}</p>
+                                <p><strong>User:</strong> ${escapeHtml(data.user_email)}</p>
+                                <p><strong>Timestamp:</strong> ${data.timestamp}</p>
+                                <p><strong>Message ID:</strong> ${escapeHtml(data.message_id || 'N/A')}</p>
+                                ${data.sender_domain ? `<p><strong>Sender Domain:</strong> ${escapeHtml(data.sender_domain)}</p>` : ''}
+                            </div>
+                        </div>
+                    `;
+
+                    // Classification result
+                    html += `
+                        <div class="detail-section">
+                            <h4>Classification Result</h4>
+                            <div class="detail-content">
+                                <p><strong>Category:</strong> <span class="category ${data.predicted_category}">${data.predicted_category}</span></p>
+                                <p><strong>Confidence:</strong> ${(data.confidence * 100).toFixed(1)}%</p>
+                                <p><strong>Processing Time:</strong> ${data.processing_time.toFixed(3)}s</p>
+                            </div>
+                        </div>
+                    `;
+
+                    // Probability breakdown
+                    if (data.probabilities) {
+                        html += `
+                            <div class="detail-section">
+                                <h4>Probability Breakdown</h4>
+                                <div class="detail-content">
+                        `;
+
+                        const categories = ['personal', 'shopping', 'spam'];
+                        categories.forEach(cat => {
+                            const prob = data.probabilities[cat] || 0;
+                            const isWinner = cat === data.predicted_category;
+                            html += `
+                                <div class="prob-bar-container">
+                                    <div class="prob-label">
+                                        <span>${cat.charAt(0).toUpperCase() + cat.slice(1)}</span>
+                                        <span>${(prob * 100).toFixed(1)}%</span>
+                                    </div>
+                                    <div class="prob-bar">
+                                        <div class="prob-fill ${cat} ${isWinner ? 'winner' : ''}" style="width: ${prob * 100}%"></div>
+                                    </div>
+                                </div>
+                            `;
+                        });
+
+                        html += `
+                                </div>
+                            </div>
+                        `;
+                    }
+
+                    // Explanation
+                    if (data.explanation && data.explanation.length > 0) {
+                        html += `
+                            <div class="detail-section">
+                                <h4>Why This Classification?</h4>
+                                <div class="detail-content">
+                                    <ul class="explanation-list">
+                        `;
+
+                        data.explanation.forEach(item => {
+                            html += `<li>${escapeHtml(item)}</li>`;
+                        });
+
+                        html += `
+                                    </ul>
+                                </div>
+                            </div>
+                        `;
+                    }
+
+                    // Body preview
+                    if (data.body_preview) {
+                        html += `
+                            <div class="detail-section">
+                                <h4>Email Body Preview</h4>
+                                <div class="detail-content">
+                                    <div class="body-preview">${escapeHtml(data.body_preview)}</div>
+                                </div>
+                            </div>
+                        `;
+                    } else {
+                        html += `
+                            <div class="detail-section">
+                                <h4>Email Body</h4>
+                                <div class="detail-content">
+                                    <p style="color: #666; font-style: italic;">Body content not available for this email.</p>
+                                </div>
+                            </div>
+                        `;
+                    }
+
+                    modalBody.innerHTML = html;
+                })
+                .catch(error => {
+                    modalBody.innerHTML = `<div class="loading">Error loading details: ${error.message}</div>`;
+                });
+        }
+
+        function closeModal() {
+            const modal = document.getElementById('classification-modal');
+            modal.classList.remove('show');
+            isModalOpen = false;
+        }
+
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Close modal on overlay click
+        document.addEventListener('click', function(e) {
+            if (e.target.classList.contains('modal-overlay')) {
+                closeModal();
+            }
+        });
+
+        // Close modal on Escape key
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                closeModal();
+            }
+        });
     </script>
 </head>
 <body>
     <div id="toast" class="toast"></div>
+
+    <!-- Classification Details Modal -->
+    <div id="classification-modal" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <h3>Classification Details</h3>
+                <button class="modal-close" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="modal-body" id="modal-body-content">
+                <div class="loading">Loading...</div>
+            </div>
+        </div>
+    </div>
+
     <div class="container">
         <h1>Email Classifier Dashboard</h1>
 
@@ -617,6 +912,7 @@ TEMPLATE = """
         {% endif %}
         
         <h2>Recent Classifications (Last 50)</h2>
+        <p style="color: #666; font-size: 14px;">Click on a row to view classification details and explanation.</p>
         <table>
             <thead>
                 <tr>
@@ -630,7 +926,7 @@ TEMPLATE = """
             </thead>
             <tbody>
                 {% for record in recent %}
-                <tr>
+                <tr class="clickable-row" onclick="openClassificationModal({{ record.id }})">
                     <td>{{ record.timestamp }}</td>
                     <td>{{ record.user_email }}</td>
                     <td>{{ record.subject[:60] }}...</td>
@@ -679,10 +975,11 @@ TEMPLATE = """
             </div>
             <p style="color: #666; font-size: 14px;">
                 {% if selected_user %}
-                Complete history of emails classified for {{ selected_user }}
+                Complete history of emails classified for {{ selected_user }}.
                 {% else %}
                 Complete history of all classified emails. Select a user to filter.
                 {% endif %}
+                Click on a row to view classification details and explanation.
             </p>
 
             {% if mail_history %}
@@ -699,7 +996,7 @@ TEMPLATE = """
                 </thead>
                 <tbody>
                     {% for record in mail_history %}
-                    <tr>
+                    <tr class="clickable-row" onclick="openClassificationModal({{ record.id }})">
                         <td>{{ record.timestamp }}</td>
                         {% if not selected_user %}<td>{{ record.user_email }}</td>{% endif %}
                         <td>{{ record.subject[:80] }}{% if record.subject|length > 80 %}...{% endif %}</td>
@@ -912,14 +1209,14 @@ def dashboard():
 
     # Get recent classifications (for overview tab)
     if selected_user:
-        c.execute('''SELECT timestamp, user_email, subject, predicted_category,
+        c.execute('''SELECT id, timestamp, user_email, subject, predicted_category,
                             confidence, processing_time
                      FROM classifications
                      WHERE user_email = ?
                      ORDER BY timestamp DESC
                      LIMIT 50''', (selected_user,))
     else:
-        c.execute('''SELECT timestamp, user_email, subject, predicted_category,
+        c.execute('''SELECT id, timestamp, user_email, subject, predicted_category,
                             confidence, processing_time
                      FROM classifications
                      ORDER BY timestamp DESC
@@ -928,12 +1225,13 @@ def dashboard():
     recent = []
     for row in c.fetchall():
         recent.append({
-            'timestamp': row[0],
-            'user_email': row[1],
-            'subject': row[2] or 'No subject',
-            'predicted_category': row[3],
-            'confidence': row[4],
-            'processing_time': row[5]
+            'id': row[0],
+            'timestamp': row[1],
+            'user_email': row[2],
+            'subject': row[3] or 'No subject',
+            'predicted_category': row[4],
+            'confidence': row[5],
+            'processing_time': row[6]
         })
 
     # Get training data distribution by user
@@ -967,14 +1265,14 @@ def dashboard():
 
     # Get mail history (for mail history tab) - more records
     if selected_user:
-        c.execute('''SELECT timestamp, user_email, subject, predicted_category,
+        c.execute('''SELECT id, timestamp, user_email, subject, predicted_category,
                             confidence, processing_time
                      FROM classifications
                      WHERE user_email = ?
                      ORDER BY timestamp DESC
                      LIMIT 200''', (selected_user,))
     else:
-        c.execute('''SELECT timestamp, user_email, subject, predicted_category,
+        c.execute('''SELECT id, timestamp, user_email, subject, predicted_category,
                             confidence, processing_time
                      FROM classifications
                      ORDER BY timestamp DESC
@@ -983,12 +1281,13 @@ def dashboard():
     mail_history = []
     for row in c.fetchall():
         mail_history.append({
-            'timestamp': row[0],
-            'user_email': row[1],
-            'subject': row[2] or 'No subject',
-            'predicted_category': row[3],
-            'confidence': row[4],
-            'processing_time': row[5]
+            'id': row[0],
+            'timestamp': row[1],
+            'user_email': row[2],
+            'subject': row[3] or 'No subject',
+            'predicted_category': row[4],
+            'confidence': row[5],
+            'processing_time': row[6]
         })
 
     # Get training history (for training history tab) with pagination and filtering
@@ -1273,6 +1572,120 @@ def api_model_stats():
     if stats:
         return jsonify(stats)
     return jsonify({'error': 'No model stats available'}), 404
+
+@app.route('/api/classification/<int:classification_id>')
+def api_classification_details(classification_id):
+    """API endpoint for detailed classification with explainability"""
+    conn = config.get_db()
+    c = conn.cursor()
+
+    # Get classification with all probability data
+    c.execute('''SELECT c.id, c.message_id, c.user_email, c.subject, c.predicted_category,
+                        c.confidence, c.processing_time, c.timestamp,
+                        c.personal_prob, c.shopping_prob, c.spam_prob, c.sender_domain,
+                        t.body
+                 FROM classifications c
+                 LEFT JOIN training_data t ON c.message_id = t.message_id AND c.user_email = t.user_email
+                 WHERE c.id = ?''', (classification_id,))
+
+    row = c.fetchone()
+    conn.close()
+
+    if not row:
+        return jsonify({'error': 'Classification not found'}), 404
+
+    # Build probability breakdown
+    probabilities = {}
+    has_probabilities = row[8] is not None  # personal_prob
+
+    if has_probabilities:
+        probabilities = {
+            'personal': row[8],
+            'shopping': row[9],
+            'spam': row[10]
+        }
+    else:
+        # For older classifications without probability data
+        probabilities = None
+
+    # Generate explanation
+    explanation = generate_classification_explanation(
+        predicted_category=row[4],
+        confidence=row[5],
+        probabilities=probabilities,
+        sender_domain=row[11]
+    )
+
+    # Format body preview (first 1000 chars)
+    body = row[12] or ''
+    body_preview = body[:1000] + ('...' if len(body) > 1000 else '')
+
+    return jsonify({
+        'id': row[0],
+        'message_id': row[1],
+        'user_email': row[2],
+        'subject': row[3],
+        'predicted_category': row[4],
+        'confidence': row[5],
+        'processing_time': row[6],
+        'timestamp': row[7],
+        'probabilities': probabilities,
+        'sender_domain': row[11],
+        'body_preview': body_preview,
+        'explanation': explanation
+    })
+
+def generate_classification_explanation(predicted_category, confidence, probabilities, sender_domain):
+    """Generate a human-readable explanation of the classification decision"""
+    explanation = []
+
+    if not probabilities:
+        explanation.append("Detailed probability data is not available for this classification (older record).")
+        explanation.append(f"The email was classified as '{predicted_category}' with {confidence*100:.1f}% confidence.")
+        return explanation
+
+    # Sort probabilities for comparison
+    sorted_probs = sorted(probabilities.items(), key=lambda x: x[1], reverse=True)
+    winner = sorted_probs[0]
+    runner_up = sorted_probs[1] if len(sorted_probs) > 1 else None
+
+    # Primary classification reason
+    explanation.append(f"Classified as '{predicted_category}' with {confidence*100:.1f}% confidence.")
+
+    # Probability breakdown
+    prob_text = "Probability breakdown: " + ", ".join([f"{cat}: {prob*100:.1f}%" for cat, prob in sorted_probs])
+    explanation.append(prob_text)
+
+    # Confidence level interpretation
+    if confidence > 0.9:
+        explanation.append("Very high confidence - the model is highly certain about this classification.")
+    elif confidence > 0.7:
+        explanation.append("Good confidence - the model is reasonably certain about this classification.")
+    elif confidence > 0.5:
+        explanation.append("Moderate confidence - the classification is likely correct but has some uncertainty.")
+    else:
+        explanation.append("Low confidence - the model is uncertain about this classification.")
+
+    # Compare with runner-up
+    if runner_up:
+        margin = winner[1] - runner_up[1]
+        if margin < 0.1:
+            explanation.append(f"Close decision: '{runner_up[0]}' was a close second ({runner_up[1]*100:.1f}%).")
+        elif margin < 0.3:
+            explanation.append(f"'{runner_up[0]}' was considered but had lower probability ({runner_up[1]*100:.1f}%).")
+
+    # Sender domain heuristics
+    if sender_domain:
+        civic_domains = ['.gov', '.edu', '.org']
+        civic_keywords = ['government', 'county', 'city', 'state', 'municipal', 'district', 'commissioner']
+
+        is_civic = any(sender_domain.endswith(d) for d in civic_domains) or \
+                   any(kw in sender_domain for kw in civic_keywords)
+
+        if is_civic:
+            explanation.append(f"Sender domain '{sender_domain}' is a civic/institutional domain - shopping probability was reduced.")
+
+    return explanation
 
 def run_web_ui(trainer=None, classifier=None):
     """Start the web UI with production WSGI server"""

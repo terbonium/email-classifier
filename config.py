@@ -66,7 +66,23 @@ def init_db():
                   confidence REAL,
                   actual_category TEXT,
                   processing_time REAL,
+                  personal_prob REAL,
+                  shopping_prob REAL,
+                  spam_prob REAL,
+                  sender_domain TEXT,
                   timestamp DATETIME DEFAULT CURRENT_TIMESTAMP)''')
+
+    # Migrate existing classifications table - add probability columns if they don't exist
+    try:
+        c.execute("SELECT personal_prob FROM classifications LIMIT 1")
+    except sqlite3.OperationalError:
+        # Columns don't exist, add them
+        print("Migrating classifications table to add probability columns...")
+        c.execute("ALTER TABLE classifications ADD COLUMN personal_prob REAL")
+        c.execute("ALTER TABLE classifications ADD COLUMN shopping_prob REAL")
+        c.execute("ALTER TABLE classifications ADD COLUMN spam_prob REAL")
+        c.execute("ALTER TABLE classifications ADD COLUMN sender_domain TEXT")
+        print("Migration complete")
 
     # Training data table
     c.execute('''CREATE TABLE IF NOT EXISTS training_data
@@ -176,14 +192,23 @@ def get_existing_classification(message_id: str, user_email: str = None):
     return None
 
 def log_classification(message_id: str, user_email: str, subject: str,
-                       predicted: str, confidence: float, processing_time: float):
-    """Log a classification decision"""
+                       predicted: str, confidence: float, processing_time: float,
+                       probabilities: dict = None, sender_domain: str = None):
+    """Log a classification decision with full probability breakdown"""
     conn = get_db()
     c = conn.cursor()
+
+    # Extract individual probabilities
+    personal_prob = probabilities.get('personal') if probabilities else None
+    shopping_prob = probabilities.get('shopping') if probabilities else None
+    spam_prob = probabilities.get('spam') if probabilities else None
+
     c.execute('''INSERT INTO classifications
-                 (message_id, user_email, subject, predicted_category, confidence, processing_time)
-                 VALUES (?, ?, ?, ?, ?, ?)''',
-              (message_id, user_email, subject, predicted, confidence, processing_time))
+                 (message_id, user_email, subject, predicted_category, confidence, processing_time,
+                  personal_prob, shopping_prob, spam_prob, sender_domain)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+              (message_id, user_email, subject, predicted, confidence, processing_time,
+               personal_prob, shopping_prob, spam_prob, sender_domain))
     conn.commit()
     conn.close()
 
