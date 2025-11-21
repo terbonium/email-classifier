@@ -720,7 +720,7 @@ TEMPLATE = """
                 {% endif %}
             </p>
 
-            <h3 style="margin-top: 20px;">Training Data (Emails in Training Folders)</h3>
+            <h3 style="margin-top: 20px;">Training Data (Emails in Training Folders) - {{ training_total }} total</h3>
             {% if training_history %}
             <table>
                 <thead>
@@ -745,6 +745,22 @@ TEMPLATE = """
             {% else %}
             <div class="empty-state">
                 <p>No training data available{% if selected_user %} for {{ selected_user }}{% endif %}.</p>
+            </div>
+            {% endif %}
+
+            {% if training_total_pages > 1 %}
+            <div class="pagination" style="margin-top: 15px;">
+                {% if training_page > 1 %}
+                <button onclick="window.location.href='?tab=training-history&training_page={{ training_page - 1 }}{% if selected_user %}&user={{ selected_user }}{% endif %}'">Previous</button>
+                {% else %}
+                <button disabled>Previous</button>
+                {% endif %}
+                <span style="margin: 0 15px;">Page {{ training_page }} of {{ training_total_pages }}</span>
+                {% if training_page < training_total_pages %}
+                <button onclick="window.location.href='?tab=training-history&training_page={{ training_page + 1 }}{% if selected_user %}&user={{ selected_user }}{% endif %}'">Next</button>
+                {% else %}
+                <button disabled>Next</button>
+                {% endif %}
             </div>
             {% endif %}
 
@@ -798,6 +814,11 @@ def dashboard():
     # Get selected user from query params
     selected_user = request.args.get('user', '')
     users = get_all_users()
+
+    # Pagination for training history
+    training_page = request.args.get('training_page', 1, type=int)
+    training_per_page = 100
+    training_offset = (training_page - 1) * training_per_page
 
     # Build WHERE clause for user filtering
     user_filter = ''
@@ -945,19 +966,24 @@ def dashboard():
             'processing_time': row[5]
         })
 
-    # Get training history (for training history tab)
+    # Get training history (for training history tab) with pagination
     if selected_user:
+        c.execute('SELECT COUNT(*) FROM training_data WHERE user_email = ?', (selected_user,))
+        training_total = c.fetchone()[0]
         c.execute('''SELECT timestamp, user_email, subject, category
                      FROM training_data
                      WHERE user_email = ?
                      ORDER BY timestamp DESC
-                     LIMIT 200''', (selected_user,))
+                     LIMIT ? OFFSET ?''', (selected_user, training_per_page, training_offset))
     else:
+        c.execute('SELECT COUNT(*) FROM training_data')
+        training_total = c.fetchone()[0]
         c.execute('''SELECT timestamp, user_email, subject, category
                      FROM training_data
                      ORDER BY timestamp DESC
-                     LIMIT 200''')
+                     LIMIT ? OFFSET ?''', (training_per_page, training_offset))
 
+    training_total_pages = (training_total + training_per_page - 1) // training_per_page
     training_history = []
     for row in c.fetchall():
         training_history.append({
@@ -1007,7 +1033,10 @@ def dashboard():
                                  selected_user=selected_user,
                                  mail_history=mail_history,
                                  training_history=training_history,
-                                 user_reclassifications=user_reclassifications)
+                                 user_reclassifications=user_reclassifications,
+                                 training_page=training_page,
+                                 training_total_pages=training_total_pages,
+                                 training_total=training_total)
 
 @app.route('/api/users')
 def api_users():
