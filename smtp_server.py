@@ -38,17 +38,18 @@ class ClassifierHandler:
             print(f"  Subject: {subject}")
         else:
             # Classify the email
-            category, confidence, proc_time, message_id, subject = self.classifier.classify(
+            category, confidence, proc_time, message_id, subject, probabilities, sender_domain = self.classifier.classify(
                 raw_email, user_email
             )
 
             print(f"  Classification: {category} (confidence: {confidence:.2f}, time: {proc_time:.3f}s)")
             print(f"  Subject: {subject}")
 
-            # Log classification (only for new classifications)
+            # Log classification (only for new classifications) with full probability breakdown
             config.log_classification(
                 message_id, user_email or 'unknown', subject,
-                category, confidence, proc_time
+                category, confidence, proc_time,
+                probabilities, sender_domain
             )
 
             # Add to training data so reclassifications can be detected
