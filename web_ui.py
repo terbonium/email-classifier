@@ -451,7 +451,12 @@ TEMPLATE = """
         }
     </style>
     <script>
+        // Track if modal is open to pause auto-refresh
+        let isModalOpen = false;
+
         function refresh() {
+            // Don't refresh if modal is open
+            if (isModalOpen) return;
             location.reload();
         }
         // Auto-refresh more frequently if training is in progress
@@ -580,6 +585,7 @@ TEMPLATE = """
 
             // Show modal with loading state
             modal.classList.add('show');
+            isModalOpen = true;
             modalBody.innerHTML = '<div class="loading">Loading classification details...</div>';
 
             // Fetch classification details
@@ -702,6 +708,7 @@ TEMPLATE = """
         function closeModal() {
             const modal = document.getElementById('classification-modal');
             modal.classList.remove('show');
+            isModalOpen = false;
         }
 
         function escapeHtml(text) {
