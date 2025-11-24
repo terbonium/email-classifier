@@ -571,11 +571,24 @@ TEMPLATE = """
             window.location.href = url.toString();
         }
 
-        // Restore active tab from URL on page load
+        // Restore active tab from URL on page load and handle auto-open classification
         document.addEventListener('DOMContentLoaded', function() {
             const url = new URL(window.location);
             const tab = url.searchParams.get('tab') || 'overview';
             switchTab(tab);
+
+            // Check if we should auto-open a classification modal (from footer link)
+            const openClassification = url.searchParams.get('open_classification');
+            if (openClassification) {
+                // Small delay to ensure page is fully loaded
+                setTimeout(() => {
+                    openClassificationModal(parseInt(openClassification));
+                }, 100);
+
+                // Clean up URL without reloading page
+                url.searchParams.delete('open_classification');
+                history.replaceState(null, '', url.toString());
+            }
         });
 
         // Modal functions
