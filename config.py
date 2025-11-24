@@ -25,6 +25,10 @@ DELIVERY_USE_TLS = os.getenv('DELIVERY_USE_TLS', 'false').lower() == 'true'
 DELIVERY_USER = os.getenv('DELIVERY_USER', '')
 DELIVERY_PASSWORD = os.getenv('DELIVERY_PASSWORD', '')
 
+# Footer settings (for adding classifier links to emails)
+FOOTER_ENABLED = os.getenv('FOOTER_ENABLED', 'true').lower() == 'true'
+CLASSIFIER_UI_BASE_URL = os.getenv('CLASSIFIER_UI_BASE_URL', 'http://localhost:8080')
+
 # Parse IMAP users from env (format: user1@example.com:password1,user2@example.com:password2)
 IMAP_USERS = []
 users_str = os.getenv('IMAP_USERS', '')
@@ -194,7 +198,8 @@ def get_existing_classification(message_id: str, user_email: str = None):
 def log_classification(message_id: str, user_email: str, subject: str,
                        predicted: str, confidence: float, processing_time: float,
                        probabilities: dict = None, sender_domain: str = None):
-    """Log a classification decision with full probability breakdown"""
+    """Log a classification decision with full probability breakdown.
+    Returns the classification ID for use in footer links."""
     conn = get_db()
     c = conn.cursor()
 
@@ -209,8 +214,12 @@ def log_classification(message_id: str, user_email: str, subject: str,
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
               (message_id, user_email, subject, predicted, confidence, processing_time,
                personal_prob, shopping_prob, spam_prob, sender_domain))
+
+    classification_id = c.lastrowid
     conn.commit()
     conn.close()
+
+    return classification_id
 
 def log_reclassification(message_id: str, user_email: str, subject: str,
                          old_category: str, new_category: str,
