@@ -367,7 +367,8 @@ class EmailTrainer:
             self.idle_monitor = None
 
         # Track last training date to avoid multiple trainings in same day
-        last_training_date = datetime.now().date()
+        # Initialize to yesterday so scheduled training can run on the first day
+        last_training_date = (datetime.now() - timedelta(days=1)).date()
 
         # Periodic retraining check
         try:
