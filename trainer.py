@@ -380,28 +380,36 @@ class EmailTrainer:
                 current_time = now.time()
                 current_date = now.date()
 
-                # Check if it's the scheduled time and we haven't trained today yet
-                if (current_time.hour == scheduled_hour and
-                    current_time.minute == scheduled_minute and
-                    current_date != last_training_date):
+                # Check if it's past the scheduled time and we haven't trained today yet
+                # Use >= for minute comparison to avoid missing the window due to timing drift
+                is_scheduled_hour = current_time.hour == scheduled_hour
+                is_past_scheduled_minute = current_time.minute >= scheduled_minute
+                not_trained_today = current_date != last_training_date
 
+                if is_scheduled_hour and is_past_scheduled_minute and not_trained_today:
                     print(f"\n=== Scheduled Training at {now.strftime('%Y-%m-%d %H:%M:%S')} ===")
 
-                    # Perform nightly reclassification check before retraining
-                    print("Running nightly reclassification check...")
-                    with self.reclassification_lock:
-                        updated = self.check_reclassifications()
+                    try:
+                        # Perform nightly reclassification check before retraining
+                        print("Running nightly reclassification check...")
+                        with self.reclassification_lock:
+                            updated = self.check_reclassifications()
 
-                    if updated > 0:
-                        print(f"Found {updated} reclassifications, retraining...")
-                        self.retrain()
-                    else:
-                        print("No new reclassifications found, retraining with existing data...")
-                        self.retrain()
+                        if updated > 0:
+                            print(f"Found {updated} reclassifications, retraining...")
+                            self.retrain()
+                        else:
+                            print("No new reclassifications found, retraining with existing data...")
+                            self.retrain()
 
-                    # Update last training date
+                        print(f"Next scheduled training: tomorrow at {scheduled_hour:02d}:{scheduled_minute:02d}")
+
+                    except Exception as e:
+                        print(f"⚠️  Error during scheduled training: {e}")
+                        print("   Training will be retried at the next scheduled time")
+
+                    # Update last training date even if training failed to prevent retry loops
                     last_training_date = current_date
-                    print(f"Next scheduled training: tomorrow at {scheduled_hour:02d}:{scheduled_minute:02d}")
 
         except KeyboardInterrupt:
             print("\n\n=== Shutting down training loop ===")
